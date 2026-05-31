@@ -1,0 +1,8 @@
+services:
+  libretranslate:
+    image: libretranslate/libretranslate:latest
+    ports:
+      - "5000:5000"
+    environment:
+      LT_UPDATE_MODELS: "true"
+      LT_LOAD_ONLY: "en,ko,ja,zh,es,fr,de,ru,vi,th,id"

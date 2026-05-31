@@ -1,0 +1,51 @@
+{
+  "name": "translatorcat-2026",
+  "version": "0.1.0",
+  "description": "A floating pixel cat that translates clipboard text in a speech bubble.",
+  "main": "electron/main.cjs",
+  "author": "obundh",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "vite --host 127.0.0.1",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && node scripts/start-electron.cjs",
+    "start": "node scripts/start-electron.cjs",
+    "typecheck": "tsc --noEmit",
+    "build:renderer": "vite build",
+    "build": "npm run typecheck && npm run build:renderer",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "concurrently": "^9.1.0",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.obundh.translatorcat2026",
+    "productName": "TranslatorCat 2026",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    }
+  }
+}
