@@ -63,6 +63,8 @@ docker compose up -d
 
 This keeps the app API-key-free for users because translation runs on the user's machine.
 
+If the app shows `fetch failed`, the local translation server is not running. Install/start Docker Desktop first, then run `docker compose up -d`, or change the endpoint in settings.
+
 ### Offline Engine Direction
 
 For a public installer, the best API-key-free path is to bundle a local translation engine instead of calling a hosted API.

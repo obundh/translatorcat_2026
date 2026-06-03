@@ -206,6 +206,27 @@ function normalizeEndpoint(endpoint) {
   return `${trimmed.replace(/\/$/, "")}/translate`;
 }
 
+function isLocalEndpoint(endpoint) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\b/i.test(String(endpoint || ""));
+}
+
+function explainFetchError(error) {
+  const message = String(error && error.message ? error.message : error);
+
+  if (/fetch failed/i.test(message) && isLocalEndpoint(settings.endpoint)) {
+    return [
+      "Local translation server is not running.",
+      "Start LibreTranslate with `docker compose up -d`, or change the endpoint in settings."
+    ].join(" ");
+  }
+
+  if (/fetch failed/i.test(message)) {
+    return "Could not reach the translation endpoint. Check the endpoint URL, network, or server status.";
+  }
+
+  return message;
+}
+
 function normalizeClipboardText(text) {
   return String(text || "")
     .replace(/\r\n/g, "\n")
@@ -299,7 +320,7 @@ async function translateText(rawText, trigger = "manual") {
     }
   } catch (error) {
     if (runId === translateRunId) {
-      const message = error && error.name === "AbortError" ? "Translation request timed out." : String(error.message || error);
+      const message = error && error.name === "AbortError" ? "Translation request timed out." : explainFetchError(error);
       setTranslationState({
         status: "error",
         sourceText: clippedText,
