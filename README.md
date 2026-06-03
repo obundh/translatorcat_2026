@@ -46,11 +46,11 @@ release/TranslatorCat-0.1.0-x64.exe
 
 ## 로컬 번역 모델
 
-- 모델: `sappho192/gemma3-multilingual-translator-270m`
+- 모델: `Xenova/m2m100_418M`
 - 런타임: `@huggingface/transformers` + ONNX Runtime
 - 실행 방식: API 키 없는 로컬 실행
-- 모델 형식: q4 ONNX
-- 모델 데이터: 약 801MB
+- 모델 형식: q8 ONNX
+- 모델 데이터: 약 632MB
 
 첫 영어 번역 시 모델 파일이 없으면 한 번 다운로드합니다. 이후에는 PC에 캐시된 모델을 사용하므로 API 키나 외부 번역 API가 필요 없습니다.
 
@@ -63,4 +63,3 @@ Git에는 앱 소스, 고양이 이미지, README, 스크린샷만 올립니다.
 - `node_modules/`
 - `release/`
 - `models/.cache/`
-
