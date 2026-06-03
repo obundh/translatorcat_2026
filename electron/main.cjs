@@ -31,6 +31,7 @@ let clipboardTimer = null;
 let clipboardDebounce = null;
 let lastClipboardText = "";
 let translateRunId = 0;
+let hasShownWindow = false;
 
 function getSettingsPath() {
   return path.join(app.getPath("userData"), "settings.json");
@@ -247,6 +248,24 @@ function placeWindowOnRight(win) {
   win.setPosition(x, Math.max(area.y + 12, y), false);
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed() || hasShownWindow) {
+    return;
+  }
+
+  hasShownWindow = true;
+  mainWindow.show();
+  mainWindow.moveTop();
+  mainWindow.focus();
+  broadcastSnapshot();
+
+  setTimeout(() => {
+    if (settings.autoClipboard) {
+      translateClipboard("startup");
+    }
+  }, 500);
+}
+
 async function createWindow() {
   const display = screen.getPrimaryDisplay();
   const area = display.workArea;
@@ -266,7 +285,7 @@ async function createWindow() {
     transparent: true,
     resizable: false,
     movable: true,
-    show: false,
+    show: true,
     skipTaskbar: false,
     hasShadow: false,
     backgroundColor: "#00000000",
@@ -281,18 +300,13 @@ async function createWindow() {
   mainWindow.setAlwaysOnTop(settings.keepOnTop, "floating");
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.showInactive();
-    broadcastSnapshot();
-    setTimeout(() => {
-      if (settings.autoClipboard) {
-        translateClipboard("startup");
-      }
-    }, 500);
-  });
+  mainWindow.once("ready-to-show", showMainWindow);
+  mainWindow.webContents.once("did-finish-load", showMainWindow);
+  setTimeout(showMainWindow, 1200);
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+    hasShownWindow = false;
   });
 
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
