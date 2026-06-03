@@ -1,4 +1,5 @@
 const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, Notification } = require("electron");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -6,8 +7,11 @@ if (process.platform === "win32") {
   app.setAppUserModelId("com.obundh.translatorcat2026");
 }
 
+const LOCAL_ENGINE_PORT = 5127;
+const LOCAL_ENGINE_ENDPOINT = `http://127.0.0.1:${LOCAL_ENGINE_PORT}/translate`;
+
 const DEFAULT_SETTINGS = {
-  endpoint: "http://localhost:5000/translate",
+  endpoint: LOCAL_ENGINE_ENDPOINT,
   apiKey: "",
   sourceLang: "auto",
   targetLang: "ko",
@@ -38,6 +42,7 @@ let translateRunId = 0;
 let hasShownWindow = false;
 let tray = null;
 let isQuitting = false;
+let localEngineProcess = null;
 
 function getSettingsPath() {
   return path.join(app.getPath("userData"), "settings.json");
@@ -48,6 +53,7 @@ function loadSettings() {
     const raw = fs.readFileSync(getSettingsPath(), "utf8");
     const parsed = JSON.parse(raw);
     settings = sanitizeSettings({ ...DEFAULT_SETTINGS, ...parsed });
+    saveSettings();
   } catch {
     settings = { ...DEFAULT_SETTINGS };
   }
@@ -61,7 +67,7 @@ function saveSettings() {
 function sanitizeSettings(next) {
   const maxChars = Number(next.maxChars);
   return {
-    endpoint: String(next.endpoint || DEFAULT_SETTINGS.endpoint).trim(),
+    endpoint: migrateEndpoint(next.endpoint),
     apiKey: String(next.apiKey || ""),
     sourceLang: String(next.sourceLang || DEFAULT_SETTINGS.sourceLang),
     targetLang: String(next.targetLang || DEFAULT_SETTINGS.targetLang),
@@ -70,6 +76,20 @@ function sanitizeSettings(next) {
     keepOnTop: Boolean(next.keepOnTop),
     maxChars: Number.isFinite(maxChars) ? Math.min(Math.max(maxChars, 120), 5000) : DEFAULT_SETTINGS.maxChars
   };
+}
+
+function migrateEndpoint(endpoint) {
+  const trimmed = String(endpoint || DEFAULT_SETTINGS.endpoint).trim();
+
+  if (
+    trimmed === "http://localhost:5000/translate" ||
+    trimmed === "http://127.0.0.1:5000/translate" ||
+    trimmed === "https://libretranslate.com/translate"
+  ) {
+    return DEFAULT_SETTINGS.endpoint;
+  }
+
+  return trimmed;
 }
 
 function getSnapshot() {
@@ -113,6 +133,131 @@ function getMascotPath() {
   }
 
   return path.join(__dirname, "..", "src", "assets", "translator-cat.png");
+}
+
+function getRuntimeRoot() {
+  if (app.isPackaged) {
+    return process.resourcesPath;
+  }
+
+  return path.join(__dirname, "..");
+}
+
+function getLocalEngineRoot() {
+  return path.join(getRuntimeRoot(), ".translatorcat-engine");
+}
+
+function getLocalEnginePythonPath() {
+  return path.join(getLocalEngineRoot(), ".venv", "Scripts", "python.exe");
+}
+
+function getLocalEngineServerPath() {
+  return path.join(getRuntimeRoot(), "scripts", "local-translate-server.py");
+}
+
+function getLocalEngineSetupPath() {
+  return path.join(getRuntimeRoot(), "scripts", "setup-local-engine.ps1");
+}
+
+function isBuiltInLocalEndpoint(endpoint) {
+  return normalizeEndpoint(endpoint) === LOCAL_ENGINE_ENDPOINT;
+}
+
+function localEngineInstallMessage() {
+  return "Local Argos engine is not installed yet. Run `npm run setup:engine`, or open Settings and click Local Engine Install.";
+}
+
+async function pingLocalEngine(timeoutMs = 1200) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${LOCAL_ENGINE_PORT}/health`, {
+      signal: controller.signal
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function isLocalEngineInstalled() {
+  return fs.existsSync(getLocalEnginePythonPath()) && fs.existsSync(getLocalEngineServerPath());
+}
+
+function startLocalEngineProcess() {
+  if (localEngineProcess && !localEngineProcess.killed) {
+    return;
+  }
+
+  if (!isLocalEngineInstalled()) {
+    throw new Error(localEngineInstallMessage());
+  }
+
+  localEngineProcess = spawn(
+    getLocalEnginePythonPath(),
+    [
+      getLocalEngineServerPath(),
+      "--serve",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      String(LOCAL_ENGINE_PORT)
+    ],
+    {
+      cwd: getRuntimeRoot(),
+      env: {
+        ...process.env,
+        PYTHONUTF8: "1"
+      },
+      windowsHide: true
+    }
+  );
+
+  localEngineProcess.on("exit", () => {
+    localEngineProcess = null;
+  });
+}
+
+async function ensureLocalEngineReady() {
+  if (!isBuiltInLocalEndpoint(settings.endpoint)) {
+    return;
+  }
+
+  if (await pingLocalEngine()) {
+    return;
+  }
+
+  startLocalEngineProcess();
+
+  for (let index = 0; index < 30; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    if (await pingLocalEngine(900)) {
+      return;
+    }
+  }
+
+  throw new Error("Local Argos engine did not start. Run `npm run setup:engine` and try again.");
+}
+
+function openLocalEngineSetup() {
+  const setupPath = getLocalEngineSetupPath();
+
+  if (!fs.existsSync(setupPath)) {
+    throw new Error("Local engine setup script was not found.");
+  }
+
+  spawn(
+    "powershell.exe",
+    ["-NoExit", "-ExecutionPolicy", "Bypass", "-File", setupPath],
+    {
+      cwd: getRuntimeRoot(),
+      detached: true,
+      windowsHide: false
+    }
+  );
 }
 
 function getTrayImage() {
@@ -214,10 +359,7 @@ function explainFetchError(error) {
   const message = String(error && error.message ? error.message : error);
 
   if (/fetch failed/i.test(message) && isLocalEndpoint(settings.endpoint)) {
-    return [
-      "Local translation server is not running.",
-      "Start LibreTranslate with `docker compose up -d`, or change the endpoint in settings."
-    ].join(" ");
+    return "Local Argos engine is not running. Run `npm run setup:engine`, or open Settings and click Local Engine Install.";
   }
 
   if (/fetch failed/i.test(message)) {
@@ -278,6 +420,8 @@ async function translateText(rawText, trigger = "manual") {
   const timeout = setTimeout(() => controller.abort(), 22000);
 
   try {
+    await ensureLocalEngineReady();
+
     const response = await fetch(normalizeEndpoint(settings.endpoint), {
       method: "POST",
       headers: {
@@ -506,6 +650,10 @@ function registerIpc() {
   ipcMain.handle("translatorcat:translate-clipboard", () => translateClipboard("manual"));
   ipcMain.handle("translatorcat:translate-text", (_event, text) => translateText(text, "manual"));
 
+  ipcMain.handle("translatorcat:setup-local-engine", () => {
+    openLocalEngineSetup();
+  });
+
   ipcMain.handle("translatorcat:window-minimize", () => {
     hideMainWindowToTray();
   });
@@ -543,6 +691,15 @@ if (!gotLock) {
     registerIpc();
     startClipboardWatcher();
     await createWindow();
+    ensureLocalEngineReady().catch((error) => {
+      setTranslationState({
+        status: "error",
+        sourceText: "",
+        translatedText: "",
+        error: String(error.message || error),
+        trigger: "engine"
+      });
+    });
 
     globalShortcut.register("CommandOrControl+Shift+Y", () => {
       translateClipboard("shortcut");
@@ -560,6 +717,9 @@ app.on("will-quit", () => {
   globalShortcut.unregisterAll();
   clearInterval(clipboardTimer);
   clearTimeout(clipboardDebounce);
+  if (localEngineProcess && !localEngineProcess.killed) {
+    localEngineProcess.kill();
+  }
 });
 
 app.on("window-all-closed", () => {

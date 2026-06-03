@@ -77,6 +77,7 @@ export function installBrowserPreviewApi() {
       emit();
       return previewSnapshot;
     },
+    setupLocalEngine: async () => undefined,
     minimize: async () => undefined,
     close: async () => undefined,
     placeRight: async () => undefined,

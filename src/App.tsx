@@ -1,6 +1,7 @@
 import {
   Clipboard,
   ClipboardCheck,
+  Download,
   Languages,
   LocateFixed,
   Minus,
@@ -261,6 +262,11 @@ function App() {
               spellCheck={false}
             />
           </label>
+
+          <button className="setupButton" type="button" onClick={() => window.translatorCat.setupLocalEngine()}>
+            <Download size={15} aria-hidden="true" />
+            로컬 엔진 설치
+          </button>
 
           <label className="wideLabel">
             <span>API Key</span>

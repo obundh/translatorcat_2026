@@ -34,6 +34,7 @@ interface TranslatorCatApi {
   updateSettings: (settings: Partial<TranslatorCatSettings>) => Promise<TranslatorCatSnapshot>;
   translateClipboard: () => Promise<TranslatorCatSnapshot>;
   translateText: (text: string) => Promise<TranslatorCatSnapshot>;
+  setupLocalEngine: () => Promise<void>;
   minimize: () => Promise<void>;
   close: () => Promise<void>;
   placeRight: () => Promise<void>;

@@ -234,7 +234,8 @@ button {
 }
 
 .translateButton,
-.saveButton {
+.saveButton,
+.setupButton {
   border: 0;
   border-radius: 12px;
   color: white;
@@ -247,6 +248,15 @@ button {
 .translateButton:disabled {
   cursor: default;
   opacity: 0.45;
+}
+
+.setupButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 36px;
+  -webkit-app-region: no-drag;
 }
 
 .catDock {

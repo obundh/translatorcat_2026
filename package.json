@@ -11,6 +11,8 @@
     "dev:renderer": "vite --host 127.0.0.1",
     "dev:electron": "wait-on http://127.0.0.1:5173 && node scripts/start-electron.cjs --dev",
     "start": "npm run build && node scripts/start-electron.cjs",
+    "setup:engine": "powershell -ExecutionPolicy Bypass -File scripts/setup-local-engine.ps1",
+    "engine:serve": ".translatorcat-engine/.venv/Scripts/python.exe scripts/local-translate-server.py --serve",
     "typecheck": "tsc --noEmit",
     "build:renderer": "vite build",
     "build": "npm run typecheck && npm run build:renderer",
@@ -38,12 +40,22 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "scripts/local-translate-server.py",
+      "scripts/setup-local-engine.ps1",
       "package.json"
     ],
     "extraResources": [
       {
         "from": "src/assets/translator-cat.png",
         "to": "translator-cat.png"
+      },
+      {
+        "from": "scripts/local-translate-server.py",
+        "to": "scripts/local-translate-server.py"
+      },
+      {
+        "from": "scripts/setup-local-engine.ps1",
+        "to": "scripts/setup-local-engine.ps1"
       }
     ],
     "directories": {

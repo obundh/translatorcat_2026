@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("translatorCat", {
   updateSettings: (settings) => ipcRenderer.invoke("translatorcat:update-settings", settings),
   translateClipboard: () => ipcRenderer.invoke("translatorcat:translate-clipboard"),
   translateText: (text) => ipcRenderer.invoke("translatorcat:translate-text", text),
+  setupLocalEngine: () => ipcRenderer.invoke("translatorcat:setup-local-engine"),
   minimize: () => ipcRenderer.invoke("translatorcat:window-minimize"),
   close: () => ipcRenderer.invoke("translatorcat:window-close"),
   placeRight: () => ipcRenderer.invoke("translatorcat:window-place-right"),

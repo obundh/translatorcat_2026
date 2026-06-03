@@ -13,8 +13,8 @@ TranslatorCat 2026 is a tiny always-on-top desktop translator. A generated pixel
 - `Ctrl+Shift+Y` global shortcut for instant clipboard translation.
 - Tray mode: hide the cat to the system tray and restore it from the tray icon.
 - Native desktop notifications for translation results while the cat is hidden.
-- LibreTranslate-compatible endpoint setting.
-- Local LibreTranslate Docker setup for self-hosted translation.
+- Local Argos Translate sidecar engine.
+- LibreTranslate-compatible endpoint setting for advanced users.
 
 ## Mascot
 
@@ -49,32 +49,38 @@ npm start
 
 ## Translation Backend
 
-The app uses a LibreTranslate-compatible endpoint. The default endpoint is:
+TranslatorCat is designed to translate locally without a user API key. The default endpoint is the local Argos sidecar server started by the Electron app:
 
 ```text
-http://localhost:5000/translate
+http://127.0.0.1:5127/translate
 ```
 
-Start a local LibreTranslate container:
+Install the local engine once:
 
 ```powershell
-docker compose up -d
+npm run setup:engine
 ```
 
-This keeps the app API-key-free for users because translation runs on the user's machine.
+Then run the app:
 
-If the app shows `fetch failed`, the local translation server is not running. Install/start Docker Desktop first, then run `docker compose up -d`, or change the endpoint in settings.
+```powershell
+npm start
+```
+
+The setup script creates a project-local `.translatorcat-engine` Python virtual environment, installs Argos Translate, and installs the default `en:ko` and `ko:en` models.
+
+If the app says the local Argos engine is not installed, run `npm run setup:engine` or open the app settings and click `로컬 엔진 설치`.
 
 ### Offline Engine Direction
 
 For a public installer, the best API-key-free path is to bundle a local translation engine instead of calling a hosted API.
 
-- Argos Translate: open-source offline translation library. Good first embedded engine candidate.
-- LibreTranslate: open-source API server powered by Argos Translate. Good for local Docker and local sidecar server modes.
+- Argos Translate: open-source offline translation library. Current local engine path.
+- LibreTranslate: open-source API server powered by Argos Translate. Still compatible with the endpoint setting, but no longer required.
 - Transformers.js: runs compatible Hugging Face models locally in browser/Electron without a server, but model size and Korean quality need testing.
 - CTranslate2: fast local inference for Transformer translation models, but packaging native binaries and models is more work.
 
-Current implementation uses local LibreTranslate-compatible HTTP so the UI can stay stable while the engine changes underneath.
+Current implementation uses a local LibreTranslate-compatible HTTP surface so the UI can stay stable while the engine changes underneath.
 
 
 ## Controls
