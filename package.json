@@ -9,8 +9,8 @@
   "scripts": {
     "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite --host 127.0.0.1",
-    "dev:electron": "wait-on http://127.0.0.1:5173 && node scripts/start-electron.cjs",
-    "start": "node scripts/start-electron.cjs",
+    "dev:electron": "wait-on http://127.0.0.1:5173 && node scripts/start-electron.cjs --dev",
+    "start": "npm run build && node scripts/start-electron.cjs",
     "typecheck": "tsc --noEmit",
     "build:renderer": "vite build",
     "build": "npm run typecheck && npm run build:renderer",

@@ -182,7 +182,7 @@ async function translateText(rawText, trigger = "manual") {
     const translatedText = payload.translatedText || payload.translation || payload.translated_text;
 
     if (!translatedText) {
-      throw new Error("번역 응답에 translatedText가 없습니다.");
+      throw new Error("Translation response did not include translatedText.");
     }
 
     if (runId === translateRunId) {
@@ -196,7 +196,7 @@ async function translateText(rawText, trigger = "manual") {
     }
   } catch (error) {
     if (runId === translateRunId) {
-      const message = error && error.name === "AbortError" ? "번역 요청 시간이 초과되었습니다." : String(error.message || error);
+      const message = error && error.name === "AbortError" ? "Translation request timed out." : String(error.message || error);
       setTranslationState({
         status: "error",
         sourceText: clippedText,
@@ -298,7 +298,7 @@ async function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
   const distIndex = path.join(__dirname, "..", "dist", "index.html");
-  const devUrl = process.env.VITE_DEV_SERVER_URL || (!app.isPackaged ? "http://127.0.0.1:5173" : "");
+  const devUrl = process.env.VITE_DEV_SERVER_URL || "";
 
   if (devUrl) {
     try {

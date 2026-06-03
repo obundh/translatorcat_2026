@@ -42,7 +42,6 @@ npm run dev
 For the packaged-production renderer:
 
 ```powershell
-npm run build
 npm start
 ```
 
