@@ -29,7 +29,7 @@ const LANGUAGES = [
 ];
 
 const DEFAULT_SETTINGS: TranslatorCatSettings = {
-  endpoint: "https://libretranslate.com/translate",
+  endpoint: "http://localhost:5000/translate",
   apiKey: "",
   sourceLang: "auto",
   targetLang: "ko",

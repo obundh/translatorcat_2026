@@ -1,9 +1,13 @@
-const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, screen } = require("electron");
+const { app, BrowserWindow, clipboard, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, Notification } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.obundh.translatorcat2026");
+}
+
 const DEFAULT_SETTINGS = {
-  endpoint: "https://libretranslate.com/translate",
+  endpoint: "http://localhost:5000/translate",
   apiKey: "",
   sourceLang: "auto",
   targetLang: "ko",
@@ -32,6 +36,8 @@ let clipboardDebounce = null;
 let lastClipboardText = "";
 let translateRunId = 0;
 let hasShownWindow = false;
+let tray = null;
+let isQuitting = false;
 
 function getSettingsPath() {
   return path.join(app.getPath("userData"), "settings.json");
@@ -81,6 +87,15 @@ function broadcastSnapshot() {
   mainWindow.webContents.send("translatorcat:snapshot", getSnapshot());
 }
 
+function truncateForNotification(text, maxLength = 180) {
+  const clean = normalizeClipboardText(text);
+  if (clean.length <= maxLength) {
+    return clean;
+  }
+
+  return `${clean.slice(0, maxLength - 1)}...`;
+}
+
 function setTranslationState(next) {
   translationState = {
     ...translationState,
@@ -90,6 +105,92 @@ function setTranslationState(next) {
     updatedAt: Date.now()
   };
   broadcastSnapshot();
+}
+
+function getMascotPath() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "translator-cat.png");
+  }
+
+  return path.join(__dirname, "..", "src", "assets", "translator-cat.png");
+}
+
+function getTrayImage() {
+  const image = nativeImage.createFromPath(getMascotPath());
+
+  if (image.isEmpty()) {
+    return nativeImage.createEmpty();
+  }
+
+  image.setTemplateImage(false);
+  return image.resize({ width: 16, height: 16 });
+}
+
+function updateTrayMenu() {
+  if (!tray) {
+    return;
+  }
+
+  const menu = Menu.buildFromTemplate([
+    {
+      label: "Show TranslatorCat",
+      click: () => presentMainWindow()
+    },
+    {
+      label: "Translate Clipboard",
+      click: () => translateClipboard("tray")
+    },
+    {
+      label: settings.autoClipboard ? "Disable Clipboard Watch" : "Enable Clipboard Watch",
+      click: () => {
+        settings = sanitizeSettings({ ...settings, autoClipboard: !settings.autoClipboard });
+        saveSettings();
+        updateTrayMenu();
+        setTranslationState({});
+      }
+    },
+    { type: "separator" },
+    {
+      label: "Quit",
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+
+  tray.setContextMenu(menu);
+}
+
+function createTray() {
+  if (tray) {
+    return;
+  }
+
+  tray = new Tray(getTrayImage());
+  tray.setToolTip("TranslatorCat 2026");
+  tray.on("click", () => presentMainWindow());
+  tray.on("double-click", () => presentMainWindow());
+  updateTrayMenu();
+}
+
+function shouldShowTranslationNotification() {
+  return Notification.isSupported() && (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible());
+}
+
+function showTranslationNotification(title, body) {
+  if (!shouldShowTranslationNotification()) {
+    return;
+  }
+
+  const notification = new Notification({
+    title,
+    body: truncateForNotification(body),
+    silent: false
+  });
+
+  notification.on("click", () => presentMainWindow());
+  notification.show();
 }
 
 function normalizeEndpoint(endpoint) {
@@ -194,6 +295,7 @@ async function translateText(rawText, trigger = "manual") {
         error: "",
         trigger
       });
+      showTranslationNotification("TranslatorCat", String(translatedText));
     }
   } catch (error) {
     if (runId === translateRunId) {
@@ -205,6 +307,7 @@ async function translateText(rawText, trigger = "manual") {
         error: message,
         trigger
       });
+      showTranslationNotification("TranslatorCat needs attention", message);
     }
   } finally {
     clearTimeout(timeout);
@@ -248,22 +351,46 @@ function placeWindowOnRight(win) {
   win.setPosition(x, Math.max(area.y + 12, y), false);
 }
 
+function presentMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  mainWindow.setSkipTaskbar(false);
+  mainWindow.show();
+  mainWindow.moveTop();
+  mainWindow.focus();
+  broadcastSnapshot();
+}
+
 function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed() || hasShownWindow) {
     return;
   }
 
   hasShownWindow = true;
-  mainWindow.show();
-  mainWindow.moveTop();
-  mainWindow.focus();
-  broadcastSnapshot();
+  presentMainWindow();
 
   setTimeout(() => {
     if (settings.autoClipboard) {
       translateClipboard("startup");
     }
   }, 500);
+}
+
+function hideMainWindowToTray() {
+  createTray();
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.setSkipTaskbar(true);
+  mainWindow.hide();
 }
 
 async function createWindow() {
@@ -304,6 +431,20 @@ async function createWindow() {
   mainWindow.webContents.once("did-finish-load", showMainWindow);
   setTimeout(showMainWindow, 1200);
 
+  mainWindow.on("minimize", (event) => {
+    event.preventDefault();
+    hideMainWindowToTray();
+  });
+
+  mainWindow.on("close", (event) => {
+    if (isQuitting) {
+      return;
+    }
+
+    event.preventDefault();
+    hideMainWindowToTray();
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
     hasShownWindow = false;
@@ -336,6 +477,7 @@ function registerIpc() {
       mainWindow.setAlwaysOnTop(settings.keepOnTop, "floating");
     }
 
+    updateTrayMenu();
     setTranslationState({});
     return getSnapshot();
   });
@@ -344,12 +486,13 @@ function registerIpc() {
   ipcMain.handle("translatorcat:translate-text", (_event, text) => translateText(text, "manual"));
 
   ipcMain.handle("translatorcat:window-minimize", () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.minimize();
-    }
+    hideMainWindowToTray();
   });
 
-  ipcMain.handle("translatorcat:window-close", () => app.quit());
+  ipcMain.handle("translatorcat:window-close", () => {
+    isQuitting = true;
+    app.quit();
+  });
 
   ipcMain.handle("translatorcat:window-place-right", () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -368,13 +511,14 @@ if (!gotLock) {
       if (mainWindow.isMinimized()) {
         mainWindow.restore();
       }
-      mainWindow.showInactive();
+      presentMainWindow();
       placeWindowOnRight(mainWindow);
     }
   });
 
   app.whenReady().then(async () => {
     loadSettings();
+    createTray();
     registerIpc();
     startClipboardWatcher();
     await createWindow();

@@ -11,6 +11,8 @@ TranslatorCat 2026 is a tiny always-on-top desktop translator. A generated pixel
 - Speech-bubble translation result with optional original text.
 - Manual text input when you want to translate without touching the clipboard.
 - `Ctrl+Shift+Y` global shortcut for instant clipboard translation.
+- Tray mode: hide the cat to the system tray and restore it from the tray icon.
+- Native desktop notifications for translation results while the cat is hidden.
 - LibreTranslate-compatible endpoint setting.
 - Local LibreTranslate Docker setup for self-hosted translation.
 
@@ -50,12 +52,6 @@ npm start
 The app uses a LibreTranslate-compatible endpoint. The default endpoint is:
 
 ```text
-https://libretranslate.com/translate
-```
-
-You can switch it in the app settings to a local server:
-
-```text
 http://localhost:5000/translate
 ```
 
@@ -65,12 +61,28 @@ Start a local LibreTranslate container:
 docker compose up -d
 ```
 
+This keeps the app API-key-free for users because translation runs on the user's machine.
+
+### Offline Engine Direction
+
+For a public installer, the best API-key-free path is to bundle a local translation engine instead of calling a hosted API.
+
+- Argos Translate: open-source offline translation library. Good first embedded engine candidate.
+- LibreTranslate: open-source API server powered by Argos Translate. Good for local Docker and local sidecar server modes.
+- Transformers.js: runs compatible Hugging Face models locally in browser/Electron without a server, but model size and Korean quality need testing.
+- CTranslate2: fast local inference for Transformer translation models, but packaging native binaries and models is more work.
+
+Current implementation uses local LibreTranslate-compatible HTTP so the UI can stay stable while the engine changes underneath.
+
+
 ## Controls
 
 - Clipboard icon: toggle automatic clipboard translation.
 - Rotate icon: translate the current clipboard immediately.
 - Pin icon: keep the cat above other windows.
 - Locate icon: snap the window back to the right side.
+- Minus icon: hide TranslatorCat to the system tray.
+- Tray icon: show TranslatorCat, translate clipboard, toggle clipboard watch, or quit.
 - `Ctrl+Shift+Y`: translate the current clipboard.
 
 ## Build Installer

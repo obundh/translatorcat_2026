@@ -1,5 +1,5 @@
 const previewSettings: TranslatorCatSettings = {
-  endpoint: "https://libretranslate.com/translate",
+  endpoint: "http://localhost:5000/translate",
   apiKey: "",
   sourceLang: "auto",
   targetLang: "ko",

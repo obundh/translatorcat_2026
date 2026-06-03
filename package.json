@@ -40,6 +40,12 @@
       "electron/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "src/assets/translator-cat.png",
+        "to": "translator-cat.png"
+      }
+    ],
     "directories": {
       "output": "release"
     },
