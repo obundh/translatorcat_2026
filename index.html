@@ -3,10 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TranslatorCat 2026</title>
+    <title>TranslatorCat</title>
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <main class="stage" aria-label="TranslatorCat">
+      <section class="pet-shell" id="petShell">
+        <div class="bubble" aria-live="polite">
+          <div class="window-actions">
+            <button class="window-button" id="settingsButton" type="button" title="Settings" aria-label="Settings">&#9881;</button>
+            <button class="window-button" id="minimizeButton" type="button" title="Minimize" aria-label="Minimize">-</button>
+            <button class="window-button" id="quitButton" type="button" title="Quit" aria-label="Quit">x</button>
+          </div>
+          <div class="settings-panel" id="settingsPanel" hidden>
+            <div class="settings-row">
+              <label for="scaleRange">Size</label>
+              <span id="scaleValue">100%</span>
+            </div>
+            <input id="scaleRange" class="scale-range" type="range" min="0.7" max="1.35" step="0.05" value="1" />
+          </div>
+          <p class="bubble-text" id="bubbleText">...</p>
+        </div>
+        <div class="cat-wrap" aria-hidden="true">
+          <img class="cat" src="./assets/cat.png" alt="" draggable="false" />
+        </div>
+      </section>
+    </main>
+    <script src="./renderer.js"></script>
   </body>
 </html>

@@ -1,108 +1,66 @@
 # TranslatorCat 2026
 
-TranslatorCat 2026 is a tiny always-on-top desktop translator. A generated pixel cat floats near the right side of the screen, watches the clipboard, and shows translations in a speech bubble.
+작고 가벼운 데스크톱 번역 고양이입니다.
+
+투명 창 위에서 픽셀 아트 고양이가 살짝 움직이고, 클립보드에 영어 문장이 들어오면 로컬 AI 번역 모델로 한국어 번역 결과를 말풍선에 보여줍니다.
 
 ![TranslatorCat screenshot](docs/translatorcat-screenshot.png)
 
-## Features
+## 기능
 
-- Floating transparent Electron window with a generated pixel-art cat mascot.
-- Automatic clipboard translation.
-- Speech-bubble translation result with optional original text.
-- Manual text input when you want to translate without touching the clipboard.
-- `Ctrl+Shift+Y` global shortcut for instant clipboard translation.
-- Tray mode: hide the cat to the system tray and restore it from the tray icon.
-- Native desktop notifications for translation results while the cat is hidden.
-- Local Argos Translate sidecar engine.
-- LibreTranslate-compatible endpoint setting for advanced users.
+- 생성형 이미지 기반 픽셀 아트 고양이
+- 오른쪽에 뜨는 프레임 없는 투명 Electron 창
+- 걷기, 멈춤, 스트레칭, 낮잠 느낌의 가벼운 애니메이션
+- 클립보드 영어 텍스트 자동 감지
+- 영어 -> 한국어 로컬 AI 번역
+- 설정 버튼에서 고양이와 말풍선 크기 조절
+- 설치 없이 실행할 수 있는 portable exe 빌드
 
-## Mascot
+## 사용법
 
-The cat mascot was generated with the built-in image generation tool, then processed from a chroma-key source into a transparent PNG.
+1. 앱을 실행합니다.
+2. 영어 문장을 복사합니다.
+3. 고양이 말풍선에 한국어 번역 결과가 자동으로 뜹니다.
+4. 말풍선 오른쪽 위 설정 버튼에서 크기를 조절할 수 있습니다.
 
-![Generated TranslatorCat mascot](src/assets/translator-cat.png)
-
-Final asset:
-
-```text
-src/assets/translator-cat.png
-```
-
-Generation prompt summary:
-
-```text
-Cute 32-bit pixel art cat mascot for a desktop translation app, sitting upright, warm cream and orange fur, teal scarf accent, small speech-bubble charm, centered full-body sprite, no text, no watermark, on a flat #00ff00 chroma-key background for transparent PNG extraction.
-```
-
-## Run
+## 개발 실행
 
 ```powershell
 npm install
-npm run dev
-```
-
-For the packaged-production renderer:
-
-```powershell
 npm start
 ```
 
-## Translation Backend
+## exe 만들기
 
-TranslatorCat is designed to translate locally without a user API key. The default endpoint is the local Argos sidecar server started by the Electron app:
+```powershell
+npm run build
+```
+
+빌드가 끝나면 아래 파일이 생성됩니다.
 
 ```text
-http://127.0.0.1:5127/translate
+release/TranslatorCat-0.1.0-x64.exe
 ```
 
-Install the local engine once:
+`release/` 폴더는 빌드 산출물이라 Git에는 올리지 않습니다.
 
-```powershell
-npm run setup:engine
-```
+## 로컬 번역 모델
 
-Then run the app:
+- 모델: `sappho192/gemma3-multilingual-translator-270m`
+- 런타임: `@huggingface/transformers` + ONNX Runtime
+- 실행 방식: API 키 없는 로컬 실행
+- 모델 형식: q4 ONNX
+- 모델 데이터: 약 801MB
 
-```powershell
-npm start
-```
+첫 영어 번역 시 모델 파일이 없으면 한 번 다운로드합니다. 이후에는 PC에 캐시된 모델을 사용하므로 API 키나 외부 번역 API가 필요 없습니다.
 
-The setup script creates a project-local `.translatorcat-engine` Python virtual environment, installs Argos Translate, and installs the default `en:ko` and `ko:en` models.
+## 배포 메모
 
-If the app says the local Argos engine is not installed, run `npm run setup:engine` or open the app settings and click `로컬 엔진 설치`.
+모델 파일을 exe 안에 넣으면 실행 파일이 1GB급으로 커지기 때문에 현재 버전은 첫 실행 후 로컬 캐시에 저장하는 방식입니다.
 
-### Offline Engine Direction
+Git에는 앱 소스, 고양이 이미지, README, 스크린샷만 올립니다. 아래 항목은 제외합니다.
 
-For a public installer, the best API-key-free path is to bundle a local translation engine instead of calling a hosted API.
+- `node_modules/`
+- `release/`
+- `models/.cache/`
 
-- Argos Translate: open-source offline translation library. Current local engine path.
-- LibreTranslate: open-source API server powered by Argos Translate. Still compatible with the endpoint setting, but no longer required.
-- Transformers.js: runs compatible Hugging Face models locally in browser/Electron without a server, but model size and Korean quality need testing.
-- CTranslate2: fast local inference for Transformer translation models, but packaging native binaries and models is more work.
-
-Current implementation uses a local LibreTranslate-compatible HTTP surface so the UI can stay stable while the engine changes underneath.
-
-
-## Controls
-
-- Clipboard icon: toggle automatic clipboard translation.
-- Rotate icon: translate the current clipboard immediately.
-- Pin icon: keep the cat above other windows.
-- Locate icon: snap the window back to the right side.
-- Minus icon: hide TranslatorCat to the system tray.
-- Tray icon: show TranslatorCat, translate clipboard, toggle clipboard watch, or quit.
-- `Ctrl+Shift+Y`: translate the current clipboard.
-
-## Build Installer
-
-```powershell
-npm run dist
-```
-
-Installer output:
-
-```text
-release/TranslatorCat 2026 Setup 0.1.0.exe
-```
-
-The installer is generated locally and ignored by Git.

@@ -1,69 +1,51 @@
 {
   "name": "translatorcat-2026",
   "version": "0.1.0",
-  "description": "A floating pixel cat that translates clipboard text in a speech bubble.",
+  "description": "A tiny desktop cat that shows clipboard text in a speech bubble.",
   "main": "electron/main.cjs",
+  "scripts": {
+    "start": "node scripts/start.cjs",
+    "build": "electron-builder --win portable",
+    "build:dir": "electron-builder --dir"
+  },
+  "keywords": [
+    "desktop-pet",
+    "clipboard",
+    "cat",
+    "electron"
+  ],
   "author": "obundh",
   "license": "MIT",
-  "private": true,
-  "scripts": {
-    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\"",
-    "dev:renderer": "vite --host 127.0.0.1",
-    "dev:electron": "wait-on http://127.0.0.1:5173 && node scripts/start-electron.cjs --dev",
-    "start": "npm run build && node scripts/start-electron.cjs",
-    "setup:engine": "powershell -ExecutionPolicy Bypass -File scripts/setup-local-engine.ps1",
-    "engine:serve": ".translatorcat-engine/.venv/Scripts/python.exe scripts/local-translate-server.py --serve",
-    "typecheck": "tsc --noEmit",
-    "build:renderer": "vite build",
-    "build": "npm run typecheck && npm run build:renderer",
-    "dist": "npm run build && electron-builder"
-  },
-  "dependencies": {
-    "lucide-react": "^0.468.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
-  },
   "devDependencies": {
-    "@types/react": "^19.2.15",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.2.0",
-    "concurrently": "^9.1.0",
-    "electron": "^42.3.0",
-    "electron-builder": "^26.8.1",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.3",
-    "wait-on": "^8.0.1"
+    "electron": "42.3.2",
+    "electron-builder": "26.8.1"
   },
   "build": {
     "appId": "com.obundh.translatorcat2026",
-    "productName": "TranslatorCat 2026",
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "scripts/local-translate-server.py",
-      "scripts/setup-local-engine.ps1",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "src/assets/translator-cat.png",
-        "to": "translator-cat.png"
-      },
-      {
-        "from": "scripts/local-translate-server.py",
-        "to": "scripts/local-translate-server.py"
-      },
-      {
-        "from": "scripts/setup-local-engine.ps1",
-        "to": "scripts/setup-local-engine.ps1"
-      }
-    ],
+    "productName": "TranslatorCat",
     "directories": {
       "output": "release"
     },
+    "files": [
+      "assets/**/*",
+      "electron/**/*",
+      "index.html",
+      "renderer.js",
+      "styles.css",
+      "package.json"
+    ],
     "win": {
-      "target": "nsis",
-      "signAndEditExecutable": false
-    }
+      "target": [
+        "portable"
+      ],
+      "signAndEditExecutable": false,
+      "artifactName": "TranslatorCat-${version}-${arch}.${ext}"
+    },
+    "asarUnpack": [
+      "node_modules/onnxruntime-node/**/*"
+    ]
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0"
   }
 }
