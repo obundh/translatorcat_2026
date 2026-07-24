@@ -63,3 +63,8 @@ Git에는 앱 소스, 고양이 이미지, README, 스크린샷만 올립니다.
 - `node_modules/`
 - `release/`
 - `models/.cache/`
+
+## 라이선스와 고지
+
+- 앱 소스 코드: [MIT License](LICENSE)
+- 사용한 런타임·모델: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
