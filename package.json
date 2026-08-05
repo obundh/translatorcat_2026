@@ -34,6 +34,40 @@
       "styles.css",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "LICENSE",
+        "to": "licenses/TranslatorCat-MIT-LICENSE.txt"
+      },
+      {
+        "from": "THIRD_PARTY_NOTICES.md",
+        "to": "licenses/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "DEPENDENCY_SOURCES.md",
+        "to": "licenses/DEPENDENCY_SOURCES.md"
+      },
+      {
+        "from": "licenses/onnxruntime-MIT.txt",
+        "to": "licenses/onnxruntime-MIT.txt"
+      },
+      {
+        "from": "node_modules/electron/LICENSE",
+        "to": "licenses/Electron-MIT.txt"
+      },
+      {
+        "from": "node_modules/@huggingface/transformers/LICENSE",
+        "to": "licenses/Transformers.js-Apache-2.0.txt"
+      },
+      {
+        "from": "node_modules/sharp/LICENSE",
+        "to": "licenses/sharp-Apache-2.0.txt"
+      },
+      {
+        "from": "node_modules/@img/sharp-win32-x64/LICENSE",
+        "to": "licenses/sharp-win32-x64-Apache-2.0-and-LGPL-3.0-or-later.txt"
+      }
+    ],
     "win": {
       "target": [
         "portable"
