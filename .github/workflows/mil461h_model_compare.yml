@@ -27,7 +27,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-          python -m pip install 'transformers==4.53.3' sentencepiece sacremoses safetensors
+          python -m pip install 'transformers==4.53.3' sentencepiece sacremoses safetensors protobuf
       - name: Compare sample translations
         run: |
           python - <<'PY'
@@ -55,12 +55,11 @@ jobs:
           output = {'samples': samples, 'models': {}}
           for name, kind in models:
             print('LOADING', name, flush=True)
-            tok = AutoTokenizer.from_pretrained(name)
+            tok = AutoTokenizer.from_pretrained(name, use_fast=False)
             model = AutoModelForSeq2SeqLM.from_pretrained(name)
             model.eval()
             rows=[]
             for text in samples:
-              kwargs={}
               if kind=='nllb':
                 try: tok.src_lang='eng_Latn'
                 except Exception: pass
