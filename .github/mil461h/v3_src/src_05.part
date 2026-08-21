@@ -1,3 +1,91 @@
+    if line.bbox[1] < 58 and (t == "MIL-STD-461H" or re.fullmatch(r"MIL-STD-461H\s*", t)):
+        return True
+    if line.bbox[1] > page.rect.height - 55:
+        if re.fullmatch(r"[ivxlcdmIVXLCDM]+|\d+", t):
+            return True
+        if t.startswith("Downloaded from"):
+            return True
+    return False
+
+
+def overlaps(rect: Sequence[float], other: Sequence[float], ratio: float = 0.35) -> bool:
+    a, b = fitz.Rect(rect), fitz.Rect(other)
+    inter = a & b
+    if inter.is_empty:
+        return False
+    return (inter.width * inter.height) / max(1.0, a.width * a.height) >= ratio
+
+
+def find_real_tables(page: fitz.Page) -> list:
+    try:
+        tables = list(page.find_tables().tables)
+    except Exception:
+        return []
+    kept = []
+    for table in tables:
+        rows = len(table.rows)
+        cols = max((len(row.cells) for row in table.rows), default=0)
+        cells = rows * cols
+        if rows < 2 or cols < 2 or cells < 4:
+            continue
+        extracted = table.extract()
+        values = [norm(str(cell or "")) for row in extracted for cell in row]
+        nonempty = [v for v in values if v]
+        density = len(nonempty) / max(1, cells)
+        avg_chars = sum(len(v) for v in nonempty) / max(1, len(nonempty))
+        area = fitz.Rect(table.bbox).width * fitz.Rect(table.bbox).height
+        if area < 800:
+            continue
+        # Graph grids and diagrams are sparse pseudo-tables.
+        if density < 0.22:
+            continue
+        if cells >= 60 and avg_chars < 6.0:
+            continue
+        # Very large page-spanning grids are almost always figures.
+        if cells >= 100 and area > page.rect.width * page.rect.height * 0.35:
+            continue
+        kept.append(table)
+    return kept
+
+
+def logical_units(page: fitz.Page, page_no: int, table_bboxes: list[Sequence[float]]) -> list[Unit]:
+    lines = extract_lines(page)
+    by_block: dict[int, list[Line]] = {}
+    for line in lines:
+        if is_header_footer(line, page):
+            continue
+        if any(overlaps(line.bbox, tb, 0.30) for tb in table_bboxes):
+            continue
+        by_block.setdefault(line.block_no, []).append(line)
+    units: list[Unit] = []
+    for block_lines in by_block.values():
+        block_lines.sort(key=lambda x: (x.bbox[1], x.bbox[0]))
+        block_width = max(x.bbox[2] for x in block_lines) - min(x.bbox[0] for x in block_lines)
+        if block_width < 180 or any(x.rotation != 0 for x in block_lines):
+            for line in block_lines:
+                t = norm(line.text)
+                if not t:
+                    continue
+                kind = "heading" if line.bold or SECTION_RE.match(t) else "label"
+                units.append(Unit(t, line.bbox, line.font_size, line.bold, line.italic, line.color, line.rotation, kind, page_no))
+            continue
+        current: list[Line] = []
+        current_kind = "paragraph"
+
+        def flush() -> None:
+            nonlocal current, current_kind
+            if not current:
+                return
+            text = " ".join(norm(x.text) for x in current if norm(x.text)).strip()
+            if text:
+                bbox = (
+                    min(x.bbox[0] for x in current), min(x.bbox[1] for x in current),
+                    max(x.bbox[2] for x in current), max(x.bbox[3] for x in current),
+                )
+                units.append(Unit(
+                    text=text,
+                    bbox=bbox,
+                    font_size=statistics.median(x.font_size for x in current),
                     bold=all(x.bold for x in current) if current_kind == "heading" else False,
                     italic=all(x.italic for x in current),
                     color=current[0].color,
@@ -19,10 +107,17 @@
             list_item = bool(LIST_RE.match(t))
             gap = 0.0 if prev is None else line.bbox[1] - prev.bbox[3]
             if heading:
-                flush()
-                current = [line]
-                current_kind = "heading"
-                flush()
+                continuation = bool(
+                    current and current_kind == "heading"
+                    and not SECTION_RE.match(t)
+                    and not re.match(r"^(?:FIGURE|TABLE|NOTE)\b", t, re.I)
+                )
+                if continuation:
+                    current.append(line)
+                else:
+                    flush()
+                    current = [line]
+                    current_kind = "heading"
             elif list_item:
                 flush()
                 current = [line]
@@ -43,8 +138,26 @@
     return units
 
 
-def remove_text_and_artifacts(page: fitz.Page, lines: list[Line], keep_header_page: bool = True) -> None:
-    # Remove link annotations. Their visible text is rebuilt; URLs remain in the footer text.
+def remove_text_and_artifacts(
+    page: fitz.Page,
+    lines: list[Line],
+    keep_header_page: bool = True,
+    force_redact_bboxes: list[Sequence[float]] | None = None,
+) -> None:
+    force_redact_bboxes = force_redact_bboxes or []
+    # Capture source decorations before redaction. Blue filled bars are hyperlink
+    # underlines; isolated left-margin vertical strokes are source link artifacts.
+    artifact_rects: list[fitz.Rect] = []
+    for drawing in page.get_drawings():
+        rect = fitz.Rect(drawing["rect"])
+        color = drawing.get("color")
+        fill = drawing.get("fill")
+        blue = bool((color and color[2] > 0.65 and color[0] < 0.35) or (fill and fill[2] > 0.65 and fill[0] < 0.35))
+        isolated_left_vertical = bool(
+            len(drawing.get("items", [])) == 1 and rect.x0 < 70 and rect.width < 2.5 and rect.height > 25
+        )
+        if blue or isolated_left_vertical:
+            artifact_rects.append(rect)
     for link in list(page.get_links()):
         try:
             page.delete_link(link)
@@ -52,104 +165,3 @@ def remove_text_and_artifacts(page: fitz.Page, lines: list[Line], keep_header_pa
             pass
     annot = page.first_annot
     while annot:
-        nxt = annot.next
-        try:
-            page.delete_annot(annot)
-        except Exception:
-            pass
-        annot = nxt
-    # Delete source text transparently so tables, graphs, and the DoD seal stay intact.
-    for line in lines:
-        t = norm(line.text)
-        if not t:
-            continue
-        if keep_header_page and is_header_footer(line, page) and not t.startswith("Downloaded from"):
-            continue
-        page.add_redact_annot(fitz.Rect(line.bbox), fill=None, cross_out=False)
-    page.apply_redactions(
-        images=fitz.PDF_REDACT_IMAGE_NONE,
-        graphics=fitz.PDF_REDACT_LINE_ART_NONE,
-        text=fitz.PDF_REDACT_TEXT_REMOVE,
-    )
-
-
-def font_size_for(unit: Unit) -> tuple[float, float, float]:
-    if unit.kind == "heading":
-        return min(10.2, max(8.6, unit.font_size * 0.92)), 7.8, 1.08
-    if unit.kind == "list":
-        return min(9.2, max(8.1, unit.font_size * 0.84)), 7.1, 1.12
-    if unit.kind == "label":
-        return min(8.6, max(6.6, unit.font_size * 0.82)), 5.2, 1.05
-    return min(9.3, max(8.2, unit.font_size * 0.84)), 7.2, 1.12
-
-
-def place_text_fit(page: fitz.Page, unit: Unit, text: str, regular_font: str, bold_font: str, next_y: float | None = None) -> dict:
-    rect = fitz.Rect(unit.bbox)
-    if unit.rotation == 0:
-        rect.x1 = min(page.rect.width - 42, max(rect.x1 + 2.0, 540 if rect.x0 < 100 else rect.x1 + 2.0))
-        if next_y is not None and next_y > rect.y1:
-            rect.y1 = max(rect.y1 + 0.8, min(next_y - 1.5, rect.y1 + max(4.0, unit.font_size * 0.9)))
-        else:
-            rect.y1 += max(1.0, unit.font_size * 0.18)
-    else:
-        rect.x0 -= 0.5; rect.x1 += 0.5; rect.y0 -= 0.5; rect.y1 += 0.5
-    fontfile = bold_font if unit.bold or unit.kind == "heading" else regular_font
-    start, minimum, lineheight = font_size_for(unit)
-    color = unit.color
-    # Hyperlink blue is not retained; body is rendered in clean black.
-    if color[2] > 0.5 and color[0] < 0.4:
-        color = (0.0, 0.0, 0.0)
-    size = start
-    spare = -1.0
-    while size >= minimum - 0.01:
-        shape = page.new_shape()
-        spare = shape.insert_textbox(
-            rect, text, fontfile=fontfile, fontname="fit", fontsize=size,
-            lineheight=lineheight, color=color, align=0, rotate=unit.rotation,
-        )
-        if spare >= -0.05:
-            break
-        size -= 0.2
-    overflow = spare < -0.05
-    if overflow and unit.rotation == 0:
-        # One final expansion into unused local space, never past the page footer.
-        rect.y1 = min(page.rect.height - 48, rect.y1 + max(5.0, unit.font_size * 1.2))
-        size = minimum
-        lineheight = 1.05
-        shape = page.new_shape()
-        spare = shape.insert_textbox(rect, text, fontfile=fontfile, fontname="fit2", fontsize=size, lineheight=lineheight, color=color, align=0)
-        overflow = spare < -0.05
-    page.insert_textbox(
-        rect, text, fontfile=fontfile,
-        fontname="kobold" if fontfile == bold_font else "koreg",
-        fontsize=size, lineheight=lineheight, color=color, align=0,
-        rotate=unit.rotation, overlay=True,
-    )
-    return {"page": unit.page_no, "kind": unit.kind, "source": unit.text[:250], "translation": text[:250], "bbox": list(rect), "font_original": unit.font_size, "font_used": size, "overflow": overflow}
-
-
-def cell_font_size(source_size: float, cell: fitz.Rect, text: str) -> tuple[float, float]:
-    if cell.width < 45:
-        return min(6.3, max(5.4, source_size * 0.80)), 4.8
-    if cell.width < 90:
-        return min(7.4, max(6.2, source_size * 0.82)), 5.3
-    return min(8.8, max(7.0, source_size * 0.84)), 5.8
-
-
-def source_cell_style(page: fitz.Page, cell: fitz.Rect) -> tuple[float, bool, int]:
-    sizes = []
-    bolds = []
-    centers = []
-    data = page.get_text("dict", flags=fitz.TEXTFLAGS_DICT)
-    for block in data.get("blocks", []):
-        if block.get("type") != 0:
-            continue
-        for line in block.get("lines", []):
-            for span in line.get("spans", []):
-                sb = fitz.Rect(span["bbox"])
-                center = ((sb.x0 + sb.x1) / 2, (sb.y0 + sb.y1) / 2)
-                if cell.contains(center) and span.get("text", "").strip():
-                    sizes.append(float(span.get("size", 8)))
-                    bolds.append("bold" in span.get("font", "").lower() or (int(span.get("flags", 0)) & 16))
-                    centers.append((sb.x0 + sb.x1) / 2)
-    size = statistics.median(sizes) if sizes else 8.0
