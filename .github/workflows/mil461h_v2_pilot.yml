@@ -6,12 +6,14 @@ on:
       - automation/milstd461h-ko-revision2
     paths:
       - '.github/milstd461h/milstd461h_v2.py.gz.b64'
+      - 'scripts/milstd461h_v2_revision.py'
       - '.github/workflows/mil461h_v2_pilot.yml'
   pull_request:
     branches:
       - main
     paths:
       - '.github/milstd461h/milstd461h_v2.py.gz.b64'
+      - 'scripts/milstd461h_v2_revision.py'
       - '.github/workflows/mil461h_v2_pilot.yml'
   workflow_dispatch:
 
@@ -46,7 +48,7 @@ jobs:
         run: |
           mkdir -p scripts work output
           base64 -d .github/milstd461h/milstd461h_v2.py.gz.b64 | gzip -d > scripts/milstd461h_v2.py
-          python -m py_compile scripts/milstd461h_v2.py
+          python -m py_compile scripts/milstd461h_v2.py scripts/milstd461h_v2_revision.py
       - name: Download and verify source
         run: |
           curl --retry 5 --retry-delay 5 -fL \
@@ -60,7 +62,7 @@ jobs:
           PY
       - name: Build representative pilot pages
         run: |
-          python scripts/milstd461h_v2.py \
+          python scripts/milstd461h_v2_revision.py \
             --source work/MIL_STD_461H_2026_EN.pdf \
             --outdir output \
             --pages '1-4,20-22,158-161,292-294'
