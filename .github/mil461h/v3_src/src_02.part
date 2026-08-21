@@ -1,0 +1,160 @@
+    "CS101, conducted susceptibility, power leads.": "CS101, 전도 내성, 전원선.",
+    "CS103, conducted susceptibility, antenna port, intermodulation.": "CS103, 전도 내성, 안테나 포트, 상호변조.",
+    "CS104, conducted susceptibility, antenna port, rejection of undesired signals.": "CS104, 전도 내성, 안테나 포트, 불요신호 제거.",
+    "CS105, conducted susceptibility, antenna port, cross-modulation.": "CS105, 전도 내성, 안테나 포트, 교차변조.",
+    "CS109, conducted susceptibility, structure current.": "CS109, 전도 내성, 구조물 전류.",
+    "CS114, conducted susceptibility, bulk cable injection.": "CS114, 전도 내성, 케이블 다발 주입.",
+    "CS115, conducted susceptibility, bulk cable injection, impulse excitation.": "CS115, 전도 내성, 케이블 다발 주입, 임펄스 여기.",
+    "CS116, conducted susceptibility, damped sinusoidal transients, cables and power leads.": "CS116, 전도 내성, 감쇠 정현파 과도현상, 케이블 및 전원선.",
+    "CS117, conducted susceptibility, lightning induced transients, cables and power leads.": "CS117, 전도 내성, 낙뢰 유도 과도현상, 케이블 및 전원선.",
+    "CS118, personnel borne electrostatic discharge.": "CS118, 인체 대전 정전기 방전.",
+    "RE101, radiated emissions, magnetic field.": "RE101, 방사 방출, 자기장.",
+    "RE102, radiated emissions, electric field.": "RE102, 방사 방출, 전계.",
+    "RE103, radiated emissions, antenna spurious and harmonic outputs.": "RE103, 방사 방출, 안테나 불요 및 고조파 출력.",
+    "RS101, radiated susceptibility, magnetic field.": "RS101, 방사 내성, 자기장.",
+    "RS103, radiated susceptibility, electric field.": "RS103, 방사 내성, 전계.",
+    "RS105, radiated susceptibility, transient electromagnetic field.": "RS105, 방사 내성, 과도 전자기장.",
+})
+
+TERM_MAP = {
+    "requirements for the control of electromagnetic interference characteristics of subsystems and equipment": "하위체계 및 장비의 전자기 간섭 특성 관리 요구사항",
+    "electromagnetic interference control procedures": "전자기 간섭 관리 절차",
+    "electromagnetic interference test procedures": "전자기 간섭 시험 절차",
+    "electromagnetic interference test report": "전자기 간섭 시험 보고서",
+    "electromagnetic environmental effects": "전자기 환경 영향",
+    "electromagnetic compatibility": "전자기 적합성",
+    "electromagnetic environment": "전자기 환경",
+    "electromagnetic interference": "전자기 간섭",
+    "radiated susceptibility": "방사 내성",
+    "conducted susceptibility": "전도 내성",
+    "radiated emissions": "방사 방출",
+    "conducted emissions": "전도 방출",
+    "audio frequency currents": "음성주파수 전류",
+    "radio frequency potential": "무선주파수 전위",
+    "power leads": "전원선",
+    "power lead": "전원선",
+    "line-to-ground filters": "선-접지 필터",
+    "line-to-ground filter": "선-접지 필터",
+    "ground plane": "접지면",
+    "shielded enclosures": "차폐실",
+    "shielded enclosure": "차폐실",
+    "equipment enclosure": "장비 함체",
+    "test facilities": "시험시설",
+    "test facility": "시험시설",
+    "test sites": "시험장소",
+    "test site": "시험장소",
+    "measurement receiver": "측정수신기",
+    "signal generator": "신호발생기",
+    "power amplifier": "전력증폭기",
+    "electric field": "전계",
+    "magnetic field": "자기장",
+    "radio frequency": "무선주파수",
+    "absorber material": "흡수체",
+    "equipment under test": "시험대상장비",
+    "government furnished equipment": "정부 제공 장비",
+    "non-developmental items": "비개발품",
+    "non-developmental item": "비개발품",
+    "commercial items": "상용품",
+    "commercial item": "상용품",
+    "procuring activity": "조달기관",
+    "subsystems": "하위체계",
+    "subsystem": "하위체계",
+    "test procedures": "시험 절차",
+    "test procedure": "시험 절차",
+    "test equipment": "시험 장비",
+    "data presentation": "자료 제시",
+    "measurement tolerances": "측정 허용오차",
+    "full width half maximum": "반치전폭",
+    "root mean square": "실효값",
+    "fast Fourier transform": "고속 푸리에 변환",
+    "effective radiated power": "유효 방사전력",
+    "electrostatic discharge": "정전기 방전",
+    "line impedance stabilization network": "선로 임피던스 안정화 회로망",
+    "transient protection device": "과도 보호소자",
+    "common mode": "공통모드",
+    "bulk cable injection": "케이블 다발 주입",
+}
+
+PRESERVE_RE = re.compile(
+    r"(?:https?://\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|"
+    r"MIL-STD-\d+[A-Z]?|SD-\d+|"
+    r"(?:CE|CS|RE|RS)\d{3}(?:-\d+)?|"
+    r"\b(?:AMSC|AREA|ASSIST|DoD|DOD|EMC|EME|EMI|EMICP|EMITP|EMITR|ERP|ESD|EUT|FCC|FFT|FWHM|GFE|IF|ISO|IEC|ANSI|IEEE|LISN|MAD|NDI|RF|RMS|TEM|TPD|CI|CW|DC|AC|NIST|DTRA|DISA|NSA|DID|DIDs|LRU|SRU)\b|"
+    r"\b\d+(?:\.\d+)*(?:\([a-zA-Z0-9.]+\))*\b|"
+    r"\b\d+(?:\.\d+)?\s*(?:Hz|kHz|MHz|GHz|dB|dBm|dBµA|dBpT|V/m|V|A|W|kW|m|cm|mm|ns|µs|μs|ms|µF|μF|ohm|Ω|%)\b)"
+)
+
+SECTION_RE = re.compile(r"^\s*(?:A\.)?\d+(?:\.\d+)*(?:\s*\([^)]*\))?\s+")
+LIST_RE = re.compile(r"^\s*(?:[a-z]\.|\([a-z0-9]+\)|\d+\.|NOTE\s*:|NOTE\s+\d+\s*:)", re.I)
+FORMULA_RE = re.compile(r"^[\s\dA-Za-z_+=×÷/\\|.,:;()\[\]{}<>^%µμΩ°#-]+$")
+TOC_NUM_RE = re.compile(r"^\s*(?:(?:A\.)?\d+(?:\.\d+)*(?:\s*\([^)]*\))?|\d+\.|A\.\d+(?:\.\d+)*)\s*$")
+DOTS_RE = re.compile(r"\.{5,}")
+PAGE_END_RE = re.compile(r"\s+([ivxlcdmIVXLCDM]+|\d+)\s*$")
+
+
+@dataclass
+class Line:
+    text: str
+    bbox: tuple[float, float, float, float]
+    font_size: float
+    bold: bool
+    italic: bool
+    color: tuple[float, float, float]
+    rotation: int
+    block_no: int
+    line_no: int
+
+
+@dataclass
+class Unit:
+    text: str
+    bbox: tuple[float, float, float, float]
+    font_size: float
+    bold: bool
+    italic: bool
+    color: tuple[float, float, float]
+    rotation: int
+    kind: str
+    page_no: int
+
+
+def pick_file(candidates: Sequence[str]) -> str:
+    for p in candidates:
+        if Path(p).exists():
+            return p
+    raise FileNotFoundError(f"No font found: {candidates}")
+
+
+def rgb(value: int) -> tuple[float, float, float]:
+    return (((value >> 16) & 255) / 255.0, ((value >> 8) & 255) / 255.0, (value & 255) / 255.0)
+
+
+def norm(text: str) -> str:
+    text = text.replace("\u00ad", "").replace("\ufeff", " ")
+    text = re.sub(r"[ \t]+", " ", text)
+    return text.strip()
+
+
+def exact_lookup(text: str) -> str | None:
+    t = norm(text)
+    if t in EXACT:
+        return EXACT[t]
+    t2 = t.rstrip()
+    if t2 in EXACT:
+        return EXACT[t2]
+    no_period = t.rstrip(".")
+    if no_period in EXACT:
+        v = EXACT[no_period]
+        return v + ("." if t.endswith(".") and not v.endswith(".") else "")
+    # Generic applicability / limits / procedures headings.
+    m = re.fullmatch(r"((?:CE|CS|RE|RS)\d{3}) applicability\.?", t, re.I)
+    if m:
+        return f"{m.group(1).upper()} 적용성."
+    m = re.fullmatch(r"((?:CE|CS|RE|RS)\d{3}) limits?\.?", t, re.I)
+    if m:
+        return f"{m.group(1).upper()} 한계값."
+    m = re.fullmatch(r"((?:CE|CS|RE|RS)\d{3}) test procedures?\.?", t, re.I)
+    if m:
+        return f"{m.group(1).upper()} 시험 절차."
+    return None
+
