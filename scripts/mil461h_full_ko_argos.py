@@ -2,8 +2,25 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
+import types
 from pathlib import Path
+
+# The shared layout engine also contains a Marian fallback class.  Stub those
+# optional imports here so the faster Argos workflow does not need PyTorch.
+torch_stub = types.ModuleType("torch")
+torch_stub.set_num_threads = lambda _n: None
+def _inference_mode():
+    def decorator(fn):
+        return fn
+    return decorator
+torch_stub.inference_mode = _inference_mode
+sys.modules.setdefault("torch", torch_stub)
+transformers_stub = types.ModuleType("transformers")
+transformers_stub.AutoModelForSeq2SeqLM = object
+transformers_stub.AutoTokenizer = object
+sys.modules.setdefault("transformers", transformers_stub)
 
 import argostranslate.package
 import argostranslate.translate
@@ -84,9 +101,7 @@ class ArgosTranslator:
             toc = base.TOC_RE.match(original)
             source = toc.group(1).strip() if toc else original
             protected, mapping = base.protect_text(source)
-            translated_parts = []
-            for chunk in self._split(protected):
-                translated_parts.append(self.translation.translate(chunk))
+            translated_parts = [self.translation.translate(chunk) for chunk in self._split(protected)]
             translated = base.restore_text(" ".join(translated_parts), mapping)
             if toc:
                 translated = f"{translated} {toc.group(2)}{toc.group(3)}"
