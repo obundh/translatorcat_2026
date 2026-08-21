@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/milstd461h/milstd461h_v2.py.gz.b64'
       - 'scripts/milstd461h_v2_revision.py'
+      - 'scripts/milstd461h_v2_final.py'
       - '.github/workflows/mil461h_v2_full.yml'
   pull_request:
     branches:
@@ -14,6 +15,7 @@ on:
     paths:
       - '.github/milstd461h/milstd461h_v2.py.gz.b64'
       - 'scripts/milstd461h_v2_revision.py'
+      - 'scripts/milstd461h_v2_final.py'
       - '.github/workflows/mil461h_v2_full.yml'
   workflow_dispatch:
 
@@ -50,7 +52,7 @@ jobs:
         run: |
           mkdir -p scripts work output
           base64 -d .github/milstd461h/milstd461h_v2.py.gz.b64 | gzip -d > scripts/milstd461h_v2.py
-          python -m py_compile scripts/milstd461h_v2.py scripts/milstd461h_v2_revision.py
+          python -m py_compile scripts/milstd461h_v2.py scripts/milstd461h_v2_revision.py scripts/milstd461h_v2_final.py
       - name: Download and verify source
         run: |
           curl --retry 5 --retry-delay 5 -fL \
@@ -64,7 +66,7 @@ jobs:
           PY
       - name: Build complete 294-page Korean translation
         run: |
-          python scripts/milstd461h_v2_revision.py \
+          python scripts/milstd461h_v2_final.py \
             --source work/MIL_STD_461H_2026_EN.pdf \
             --outdir output
       - name: Verify output and package
