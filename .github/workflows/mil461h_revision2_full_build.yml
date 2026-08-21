@@ -1,0 +1,179 @@
+name: MIL-STD-461H Korean revision 2 full build
+
+on:
+  push:
+    branches:
+      - automation/milstd461h-ko-revision2-20260821
+    paths:
+      - 'scripts/mil461h_revision2.py'
+      - 'scripts/mil461h_revision2_full.py'
+      - '.github/workflows/mil461h_revision2_full_build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install readable Korean fonts and PDF tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-nanum fonts-noto-cjk poppler-utils zip
+      - name: Install CPU translation and PDF dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install 'transformers==4.53.3' sentencepiece sacremoses safetensors protobuf 'ctranslate2==4.6.0' 'pymupdf==1.26.7' pillow numpy
+      - name: Cache converted NLLB EN-KO model
+        uses: actions/cache@v4
+        id: model-cache
+        with:
+          path: work/model
+          key: mil461h-nllb-enko-ct2-int8-v2
+      - name: Convert specialized EN-KO model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p work/model
+          ct2-transformers-converter \
+            --model NHNDQ/nllb-finetuned-en2ko \
+            --output_dir work/model \
+            --quantization int8 \
+            --force
+      - name: Download and verify MIL-STD-461H source
+        run: |
+          mkdir -p work output
+          curl --retry 5 --retry-delay 5 -fL \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o work/MIL_STD_461H_2026_EN.pdf
+          python - <<'PY'
+          import fitz
+          d=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          assert d.page_count == 294, d.page_count
+          print('Source verified:', d.page_count)
+          PY
+      - name: Translate and rebuild all 294 pages
+        run: |
+          python scripts/mil461h_revision2_full.py \
+            --source work/MIL_STD_461H_2026_EN.pdf \
+            --model-dir work/model \
+            --outdir output
+      - name: Full structural, font, terminology and visual regression gate
+        run: |
+          python - <<'PY'
+          import fitz, json, pathlib, re, math, numpy as np
+          out=pathlib.Path('output')
+          pdf=out/'MIL_STD_461H_2026_KO_REVISION2.pdf'
+          qa=json.loads((out/'MIL_STD_461H_2026_KO_REVISION2_QA.json').read_text())
+          val=json.loads((out/'MIL_STD_461H_2026_KO_REVISION2_VALIDATION.json').read_text())
+          assert pdf.exists() and pdf.stat().st_size > 1_000_000
+          d=fitz.open(pdf)
+          assert d.page_count == 294
+          assert qa['body_overflow_count'] == 0, qa['body_overflows'][:10]
+          assert qa['table_overflow_count'] == 0, qa['table_overflows'][:10]
+          assert not qa['page_issues'], qa['page_issues'][:10]
+          assert val['page_count_equal']
+          assert not val['geometry_mismatch_pages']
+          assert not val['image_count_mismatch_pages']
+          prohibited=['방사선 감수성','방사형 감수성','복사 감수성','감수성','서브시스템','하위 시스템','내비 전용','라인-투-그라운드','라인 대 그라운드','접지 평면','요구 사항']
+          all_text='\n'.join(p.get_text() for p in d)
+          bad=[x for x in prohibited if x in all_text]
+          assert not bad, bad
+          src=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          page_rates=[]; page_means=[]
+          for i in range(294):
+              sp,op=src[i],d[i]
+              a=sp.get_pixmap(matrix=fitz.Matrix(0.85,0.85),colorspace=fitz.csRGB,alpha=False)
+              b=op.get_pixmap(matrix=fitz.Matrix(0.85,0.85),colorspace=fitz.csRGB,alpha=False)
+              A=np.frombuffer(a.samples,dtype=np.uint8).reshape(a.height,a.width,a.n)[:,:,:3]
+              B=np.frombuffer(b.samples,dtype=np.uint8).reshape(b.height,b.width,b.n)[:,:,:3]
+              mask=np.zeros(A.shape[:2],dtype=bool)
+              sx=a.width/sp.rect.width; sy=a.height/sp.rect.height
+              for pg in (sp,op):
+                  for x0,y0,x1,y1,*_ in pg.get_text('words'):
+                      ix0=max(0,int(x0*sx)-3); iy0=max(0,int(y0*sy)-3)
+                      ix1=min(a.width,int(math.ceil(x1*sx))+3); iy1=min(a.height,int(math.ceil(y1*sy))+3)
+                      mask[iy0:iy1,ix0:ix1]=True
+              valid=~mask
+              delta=np.abs(A.astype(np.int16)-B.astype(np.int16)).max(axis=2)
+              rate=float((delta[valid] <= 10).mean()) if valid.any() else 1.0
+              mean=float(delta[valid].mean()) if valid.any() else 0.0
+              page_rates.append(rate); page_means.append(mean)
+          visual={'minimum_non_text_match_rate':min(page_rates),'average_non_text_match_rate':sum(page_rates)/len(page_rates),'maximum_non_text_mean_difference':max(page_means),'pages_below_0_985':[i+1 for i,x in enumerate(page_rates) if x<0.985]}
+          (out/'MIL_STD_461H_2026_KO_REVISION2_VISUAL_REGRESSION.json').write_text(json.dumps(visual,indent=2))
+          assert not visual['pages_below_0_985'], visual
+          print('Full gate passed',visual)
+          PY
+      - name: Build correct representative comparison sheet
+        run: |
+          python - <<'PY'
+          import fitz, pathlib
+          from PIL import Image,ImageDraw,ImageFont
+          src=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          out=fitz.open('output/MIL_STD_461H_2026_KO_REVISION2.pdf')
+          pages=[1,2,3,11,21,22,23,29,40,84,107,118,119,158,159,160,165,166,167,292,293,294]
+          font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',18)
+          panels=[]
+          for pno in pages:
+              a=src[pno-1].get_pixmap(matrix=fitz.Matrix(1.0,1.0),alpha=False)
+              b=out[pno-1].get_pixmap(matrix=fitz.Matrix(1.0,1.0),alpha=False)
+              panels.append((pno,Image.frombytes('RGB',(a.width,a.height),a.samples),Image.frombytes('RGB',(b.width,b.height),b.samples)))
+          w=max(x.width for _,x,_ in panels); h=sum(max(x.height,y.height)+30 for _,x,y in panels)
+          canvas=Image.new('RGB',(w*2,h),'white'); draw=ImageDraw.Draw(canvas); yy=0
+          for pno,a,b in panels:
+              draw.text((5,yy+4),f'ORIGINAL p{pno}',font=font,fill='black')
+              draw.text((w+5,yy+4),f'KOREAN REVISION p{pno}',font=font,fill='black')
+              canvas.paste(a,(0,yy+30)); canvas.paste(b,(w,yy+30)); yy+=max(a.height,b.height)+30
+          canvas.save('output/MIL_STD_461H_2026_KO_REVISION2_COMPARISON_CORRECT.png')
+          PY
+      - name: Package verified deliverables
+        run: |
+          cp work/MIL_STD_461H_2026_EN.pdf output/MIL_STD_461H_2026_EN_ORIGINAL.pdf
+          cat > output/README_KO.txt <<'EOF'
+          MIL-STD-461H 한국어 전체 번역본 - 교정판
+          ========================================
+          - 원문과 동일한 294쪽
+          - NanumBarunGothic 기반 본문 조판
+          - 표는 셀별로 분리하여 번역·재배치
+          - 그림, 수식, 선, 용지 크기와 회전 보존
+          - NLLB 영한 모델 적용 후 EMC·군용 표준 용어 후처리
+          - 본문 및 표 글자 넘침 0건 자동검증
+          - 전 페이지 비텍스트 영역 회귀 비교 수행
+          - 비공식 번역본이며 공식 해석에는 영문 원문 우선
+          EOF
+          cd output
+          sha256sum MIL_STD_461H_2026_KO_REVISION2.pdf MIL_STD_461H_2026_KO_REVISION2_QA.json MIL_STD_461H_2026_KO_REVISION2_VALIDATION.json MIL_STD_461H_2026_KO_REVISION2_VISUAL_REGRESSION.json > SHA256SUMS_FINAL.txt
+          zip -9 MIL_STD_461H_2026_KO_REVISION2_PACKAGE.zip \
+            MIL_STD_461H_2026_KO_REVISION2.pdf \
+            MIL_STD_461H_2026_EN_ORIGINAL.pdf \
+            MIL_STD_461H_2026_KO_REVISION2_QA.json \
+            MIL_STD_461H_2026_KO_REVISION2_VALIDATION.json \
+            MIL_STD_461H_2026_KO_REVISION2_VISUAL_REGRESSION.json \
+            MIL_STD_461H_2026_KO_REVISION2_COMPARISON_CORRECT.png \
+            README_KO.txt SHA256SUMS_FINAL.txt
+          ls -lh
+      - name: Upload final verified revision
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIL_STD_461H_2026_KO_REVISION2_FINAL
+          path: |
+            output/MIL_STD_461H_2026_KO_REVISION2.pdf
+            output/MIL_STD_461H_2026_KO_REVISION2_PACKAGE.zip
+            output/MIL_STD_461H_2026_KO_REVISION2_QA.json
+            output/MIL_STD_461H_2026_KO_REVISION2_VALIDATION.json
+            output/MIL_STD_461H_2026_KO_REVISION2_VISUAL_REGRESSION.json
+            output/MIL_STD_461H_2026_KO_REVISION2_COMPARISON_CORRECT.png
+            output/README_KO.txt
+            output/SHA256SUMS_FINAL.txt
+          if-no-files-found: error
+          retention-days: 7
