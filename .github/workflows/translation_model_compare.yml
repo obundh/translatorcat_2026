@@ -1,0 +1,39 @@
+name: Compare Korean translation models
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/translation_model_compare.py'
+      - '.github/workflows/translation_model_compare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install 'transformers>=4.57,<5' sentencepiece safetensors accelerate
+      - name: Run comparison
+        run: python scripts/translation_model_compare.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: translation-model-comparison
+          path: model_compare.json
+          if-no-files-found: error
+          retention-days: 7
