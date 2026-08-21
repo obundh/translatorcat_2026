@@ -6,6 +6,11 @@ on:
       - automation/milstd461h-ko-revision2-20260821
     paths:
       - '.github/workflows/export_revision_scripts.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/export_revision_scripts.yml'
   workflow_dispatch:
 
 permissions:
