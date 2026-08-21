@@ -1,0 +1,97 @@
+name: MIL-STD-461H Korean rebuild v3 sample
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/mil461h/mil461h_rebuild_v3.py.gz.b64'
+      - '.github/workflows/mil461h_rebuild_v3_sample.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sample:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Korean fonts and PDF utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk poppler-utils
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'pymupdf==1.26.7' requests pillow numpy
+      - name: Decode rebuild engine
+        run: |
+          mkdir -p scripts work output renders
+          python - <<'PY'
+          import base64, gzip, pathlib
+          src = pathlib.Path('.github/mil461h/mil461h_rebuild_v3.py.gz.b64')
+          dst = pathlib.Path('scripts/mil461h_rebuild_v3.py')
+          dst.write_bytes(gzip.decompress(base64.b64decode(src.read_text().strip())))
+          compile(dst.read_text(encoding='utf-8'), str(dst), 'exec')
+          print('Decoded rebuild engine:', dst.stat().st_size, 'bytes')
+          PY
+      - name: Download and verify MIL-STD-461H source
+        run: |
+          curl --retry 5 --retry-delay 5 -fL \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o work/MIL_STD_461H_2026_EN.pdf
+          python - <<'PY'
+          import fitz
+          d=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          assert d.page_count == 294, d.page_count
+          print('Source verified:', d.page_count, 'pages')
+          PY
+      - name: Translate and compose representative pages
+        run: |
+          python scripts/mil461h_rebuild_v3.py \
+            --source work/MIL_STD_461H_2026_EN.pdf \
+            --output output/MIL461H_KO_V3_SAMPLE.pdf \
+            --cache output/google_translation_cache.json \
+            --qa output/MIL461H_KO_V3_SAMPLE_QA.json \
+            --validation output/MIL461H_KO_V3_SAMPLE_VALIDATION.json \
+            --pages '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,21,23,47,165' \
+            --workers 8
+      - name: Render and build contact sheet
+        run: |
+          pdftoppm -r 125 -png output/MIL461H_KO_V3_SAMPLE.pdf renders/page >/dev/null 2>&1
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw, ImageFont
+          files=sorted(Path('renders').glob('page-*.png'))
+          imgs=[Image.open(p).convert('RGB') for p in files]
+          thumb_w=430
+          thumbs=[]
+          for i,img in enumerate(imgs,1):
+              scale=thumb_w/img.width
+              th=img.resize((thumb_w,int(img.height*scale)))
+              canvas=Image.new('RGB',(thumb_w,th.height+28),'white')
+              canvas.paste(th,(0,28))
+              ImageDraw.Draw(canvas).text((5,5),f'Sample output page {i}',fill='black')
+              thumbs.append(canvas)
+          cols=3
+          rows=(len(thumbs)+cols-1)//cols
+          cell_h=max(x.height for x in thumbs)
+          sheet=Image.new('RGB',(thumb_w*cols,cell_h*rows),'white')
+          for idx,img in enumerate(thumbs):
+              sheet.paste(img,((idx%cols)*thumb_w,(idx//cols)*cell_h))
+          sheet.save('output/MIL461H_KO_V3_SAMPLE_CONTACT_SHEET.jpg',quality=90)
+          PY
+          ls -lh output
+      - name: Upload sample review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIL461H_KO_V3_SAMPLE_REVIEW
+          path: output/*
+          if-no-files-found: error
+          retention-days: 3
