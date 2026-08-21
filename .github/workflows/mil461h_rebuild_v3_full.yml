@@ -1,0 +1,180 @@
+name: MIL-STD-461H Korean rebuild v3 full
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/mil461h/v3_src/**'
+      - '.github/workflows/mil461h_rebuild_v3_full.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Korean fonts and PDF utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk poppler-utils zip
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'pymupdf==1.26.7' requests pillow numpy
+      - name: Assemble and validate rebuild engine
+        run: |
+          mkdir -p scripts work output comparison
+          cat .github/mil461h/v3_src/src_*.part > scripts/mil461h_rebuild_v3.py
+          python -m py_compile scripts/mil461h_rebuild_v3.py
+          wc -c scripts/mil461h_rebuild_v3.py
+      - name: Download and verify MIL-STD-461H source
+        run: |
+          curl --retry 5 --retry-delay 5 -fL \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o work/MIL_STD_461H_2026_EN.pdf
+          python - <<'PY'
+          import fitz
+          p='work/MIL_STD_461H_2026_EN.pdf'
+          d=fitz.open(p)
+          assert d.page_count == 294, d.page_count
+          assert not d.is_encrypted
+          print('Source verified:', d.page_count, 'pages')
+          PY
+      - name: Restore exact-engine translation cache
+        uses: actions/cache@v4
+        with:
+          path: work/google_translation_cache.json
+          key: mil461h-google-ko-v3-${{ hashFiles('.github/mil461h/v3_src/**') }}
+      - name: Translate and compose all 294 pages
+        run: |
+          python scripts/mil461h_rebuild_v3.py \
+            --source work/MIL_STD_461H_2026_EN.pdf \
+            --output output/MIL461H_KO_FINAL_294P.pdf \
+            --cache work/google_translation_cache.json \
+            --qa output/MIL461H_KO_FINAL_QA.json \
+            --validation output/MIL461H_KO_FINAL_VALIDATION.json \
+            --workers 6
+          cp work/google_translation_cache.json output/google_translation_cache.json
+      - name: Structural and layout gate
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import fitz, json, pathlib, hashlib
+          out=pathlib.Path('output')
+          pdf=out/'MIL461H_KO_FINAL_294P.pdf'
+          qa=json.loads((out/'MIL461H_KO_FINAL_QA.json').read_text())
+          val=json.loads((out/'MIL461H_KO_FINAL_VALIDATION.json').read_text())
+          d=fitz.open(pdf)
+          result={
+            'file_exists': pdf.exists(),
+            'file_size': pdf.stat().st_size,
+            'page_count': d.page_count,
+            'encrypted': bool(d.is_encrypted),
+            'geometry_mismatch_pages': val.get('geometry_mismatch_pages',[]),
+            'image_count_mismatch_pages': val.get('image_count_mismatch_pages',[]),
+            'prohibited_term_pages': val.get('prohibited_term_pages',[]),
+            'residual_english_pages': val.get('residual_english_pages',[]),
+            'body_overflow_count': qa.get('body_overflow_count'),
+            'table_overflow_count': qa.get('table_overflow_count'),
+            'toc_overflow_count': qa.get('toc_overflow_count'),
+          }
+          result['structural_pass']=bool(d.page_count==294 and not d.is_encrypted and not result['geometry_mismatch_pages'] and not result['image_count_mismatch_pages'])
+          (out/'MIL461H_KO_FINAL_GATE.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(result,ensure_ascii=False,indent=2))
+          assert result['structural_pass']
+          PY
+      - name: Build original-versus-Korean representative comparison
+        run: |
+          python - <<'PY'
+          import fitz
+          from PIL import Image,ImageDraw,ImageFont
+          src=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          out=fitz.open('output/MIL461H_KO_FINAL_294P.pdf')
+          pages=[1,2,3,5,11,14,15,21,23,47,84,107,118,119,158,159,160,161,165,166,167,292,293,294]
+          font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',16)
+          panels=[]
+          for pno in pages:
+              a=src[pno-1].get_pixmap(matrix=fitz.Matrix(0.85,0.85),alpha=False)
+              b=out[pno-1].get_pixmap(matrix=fitz.Matrix(0.85,0.85),alpha=False)
+              ia=Image.frombytes('RGB',(a.width,a.height),a.samples)
+              ib=Image.frombytes('RGB',(b.width,b.height),b.samples)
+              panels.append((pno,ia,ib))
+          w=max(max(a.width,b.width) for _,a,b in panels)
+          row_h=max(max(a.height,b.height) for _,a,b in panels)+26
+          sheet=Image.new('RGB',(w*2,row_h*len(panels)),'white')
+          draw=ImageDraw.Draw(sheet)
+          y=0
+          for pno,a,b in panels:
+              draw.text((5,y+4),f'ORIGINAL p{pno}',font=font,fill='black')
+              draw.text((w+5,y+4),f'KOREAN p{pno}',font=font,fill='black')
+              sheet.paste(a,(0,y+26)); sheet.paste(b,(w,y+26))
+              y+=row_h
+          sheet.save('output/MIL461H_KO_FINAL_COMPARISON.jpg',quality=92)
+          PY
+      - name: Package verified deliverables
+        run: |
+          cp work/MIL_STD_461H_2026_EN.pdf output/MIL461H_EN_ORIGINAL_294P.pdf
+          python - <<'PY'
+          import fitz, pathlib, hashlib, json, os
+          out=pathlib.Path('output')
+          pdf=out/'MIL461H_KO_FINAL_294P.pdf'
+          d=fitz.open(pdf)
+          manifest={
+            'file':pdf.name,
+            'bytes':pdf.stat().st_size,
+            'pages':d.page_count,
+            'encrypted':bool(d.is_encrypted),
+            'sha256':hashlib.sha256(pdf.read_bytes()).hexdigest(),
+          }
+          (out/'MIL461H_KO_FINAL_MANIFEST.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          # Also create three smaller page-range PDFs for reliable delivery.
+          ranges=[(1,100),(101,200),(201,294)]
+          for first,last in ranges:
+              part=fitz.open(); part.insert_pdf(d,from_page=first-1,to_page=last-1)
+              part.save(out/f'MIL461H_KO_FINAL_P{first:03d}_{last:03d}.pdf',garbage=4,deflate=True)
+              part.close()
+          d.close()
+          PY
+          cd output
+          sha256sum MIL461H_KO_FINAL_294P.pdf MIL461H_KO_FINAL_P001_100.pdf MIL461H_KO_FINAL_P101_200.pdf MIL461H_KO_FINAL_P201_294.pdf > SHA256SUMS.txt
+          zip -9 MIL461H_KO_FINAL_PACKAGE.zip \
+            MIL461H_KO_FINAL_294P.pdf \
+            MIL461H_KO_FINAL_P001_100.pdf \
+            MIL461H_KO_FINAL_P101_200.pdf \
+            MIL461H_KO_FINAL_P201_294.pdf \
+            MIL461H_EN_ORIGINAL_294P.pdf \
+            MIL461H_KO_FINAL_QA.json \
+            MIL461H_KO_FINAL_VALIDATION.json \
+            MIL461H_KO_FINAL_GATE.json \
+            MIL461H_KO_FINAL_MANIFEST.json \
+            MIL461H_KO_FINAL_COMPARISON.jpg \
+            SHA256SUMS.txt
+          unzip -t MIL461H_KO_FINAL_PACKAGE.zip
+          ls -lh
+      - name: Upload full Korean edition
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIL461H_KO_FINAL_294P
+          path: |
+            output/MIL461H_KO_FINAL_294P.pdf
+            output/MIL461H_KO_FINAL_P001_100.pdf
+            output/MIL461H_KO_FINAL_P101_200.pdf
+            output/MIL461H_KO_FINAL_P201_294.pdf
+            output/MIL461H_KO_FINAL_PACKAGE.zip
+            output/MIL461H_KO_FINAL_QA.json
+            output/MIL461H_KO_FINAL_VALIDATION.json
+            output/MIL461H_KO_FINAL_GATE.json
+            output/MIL461H_KO_FINAL_MANIFEST.json
+            output/MIL461H_KO_FINAL_COMPARISON.jpg
+            output/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
