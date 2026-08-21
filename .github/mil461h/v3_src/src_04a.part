@@ -1,0 +1,48 @@
+
+# Reviewed terminology additions found during representative-page comparison.
+EXACT.update({
+    "Emissions and susceptibility designations.": "방출 및 내성 표기.",
+    "Alternating current (AC).": "교류(AC).",
+    "Anechoic chamber.": "무반사실.",
+    "Bandwidth.": "대역폭.",
+    "Calibration.": "교정.",
+    "Common mode voltage.": "공통모드 전압.",
+    "Calibration measurement.": "교정 측정.",
+    "Compliance.": "적합.",
+    "Cure time.": "경화시간.",
+    "Direct current (DC).": "직류(DC).",
+    "Electromagnetic interference (EMI).": "전자기 간섭(EMI).",
+    "Equipment under test (EUT).": "시험대상장비(EUT).",
+    "Line Replaceable Unit (LRU).": "현장교환단위(LRU).",
+    "Low Noise Amplifier (LNA).": "저잡음증폭기(LNA).",
+    "Non-linear Device (NLD).": "비선형소자(NLD).",
+    "Settling time.": "안정화 시간.",
+    "System.": "시스템.",
+    "Susceptibility (noun).": "내성(명사).",
+    "Swept frequency.": "스위프 주파수.",
+    "Check.": "확인.",
+    "Transferred impedance (Zt).": "전달 임피던스(Zt).",
+    "Requirements.": "요구사항.",
+    "Normal incidence.": "수직 입사.",
+})
+
+_original_formalize_reviewed = formalize
+
+def formalize(source: str, translated: str) -> str:
+    out = _original_formalize_reviewed(source, translated)
+    if re.search(r"\bsusceptibility\b", source, re.I):
+        if re.search(r"\bradiated\b", source, re.I):
+            out = re.sub(r"(?:방사\s*)?(?:민감성|민감도|감수성|내성)", "방사 내성", out)
+        elif re.search(r"\bconducted\b", source, re.I):
+            out = re.sub(r"(?:전도(?:성)?\s*)?(?:민감성|민감도|감수성|내성)", "전도 내성", out)
+        else:
+            out = re.sub(r"민감성|민감도|감수성", "내성", out)
+    if re.search(r"\bemissions?\b", source, re.I):
+        out = out.replace("배출", "방출")
+    out = re.sub(r"갖춰야 한다", "갖추어야 한다", out)
+    out = re.sub(r"해야 하며", "하여야 하며", out)
+    out = re.sub(r"해야 하고", "하여야 하고", out)
+    out = re.sub(r"해야 한다\.?", "하여야 한다.", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return out
+
