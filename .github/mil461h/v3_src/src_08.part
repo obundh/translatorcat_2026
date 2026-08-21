@@ -1,0 +1,120 @@
+                text = translator.get(source_text)
+                q = place_table_cell(page, source_page, cell_bbox, text, regular_font, bold_font, header=ri == 0)
+                q.update({"page": page_no, "source": source_text[:250], "translation": text[:250]})
+                table_qa.append(q)
+    # Place logical body units. Expand only into local gap to the next unit.
+    for idx, unit in enumerate(units):
+        if not should_translate(unit.text) and exact_lookup(unit.text) is None:
+            # Codes, formulas, and units need to be restored after transparent redaction.
+            text = unit.text
+        else:
+            text = translator.get(unit.text)
+        next_y = None
+        for nxt in units[idx + 1:]:
+            horizontal_overlap = max(0.0, min(unit.bbox[2], nxt.bbox[2]) - max(unit.bbox[0], nxt.bbox[0]))
+            if nxt.bbox[1] > unit.bbox[1] and horizontal_overlap > min(unit.bbox[2]-unit.bbox[0], nxt.bbox[2]-nxt.bbox[0]) * 0.25:
+                next_y = nxt.bbox[1]
+                break
+        body_qa.append(place_text_fit(page, unit, text, regular_font, bold_font, next_y))
+    footer = "https://ib-lenhardt.com에서 내려받음 | IBL-Lab GmbH - MIL-STD-461H / EMC 군용 시험 및 인증"
+    page.insert_textbox(fitz.Rect(90, page.rect.height - 33, page.rect.width - 90, page.rect.height - 15), footer, fontfile=regular_font, fontname="footer", fontsize=5.4, color=(0.35,0.35,0.35), align=1, overlay=True)
+    return body_qa, table_qa
+
+
+def rebuild(source_path: Path, output_path: Path, cache_path: Path, qa_path: Path, pages: list[int] | None, workers: int) -> dict:
+    source = fitz.open(source_path)
+    page_numbers = pages or list(range(1, source.page_count + 1))
+    translator = GoogleTranslator(cache_path, workers=workers)
+    translator.translate_all(collect_texts(source, page_numbers))
+    regular_font = pick_file(REGULAR_FONT_CANDIDATES)
+    bold_font = pick_file(BOLD_FONT_CANDIDATES)
+    if pages:
+        doc = fitz.open()
+        for pno in page_numbers:
+            doc.insert_pdf(source, from_page=pno-1, to_page=pno-1)
+        page_map = {pno: i for i, pno in enumerate(page_numbers)}
+    else:
+        doc = fitz.open(source_path)
+        page_map = {pno: pno-1 for pno in page_numbers}
+    body_qa: list[dict] = []
+    table_qa: list[dict] = []
+    cover_qa: list[dict] = []
+    for count, pno in enumerate(page_numbers, start=1):
+        page = doc[page_map[pno]]
+        source_page = source[pno-1]
+        if pno == 1:
+            cover_qa.extend(compose_cover(page, source_page, regular_font, bold_font))
+        elif 3 <= pno <= 14:
+            body_qa.extend(compose_toc(page, source_page, pno, translator, regular_font, bold_font))
+        else:
+            bq, tq = compose_page(page, source_page, pno, translator, regular_font, bold_font)
+            body_qa.extend(bq); table_qa.extend(tq)
+        if count % 20 == 0 or count == len(page_numbers):
+            print(f"Composed {count}/{len(page_numbers)} pages", flush=True)
+    meta = doc.metadata or {}
+    meta.update({"title": "MIL-STD-461H 한국어 전체 번역본", "subject": "비공식 한국어 번역본 - 공식 해석은 영문 원문 우선"})
+    doc.set_metadata(meta)
+    doc.save(output_path, garbage=4, deflate=True, clean=True)
+    doc.close(); source.close()
+    qa = {
+        "source": str(source_path), "output": str(output_path), "page_numbers": page_numbers,
+        "page_count": len(page_numbers), "font_regular": regular_font, "font_bold": bold_font,
+        "cover_placements": cover_qa,
+        "body_placement_count": len(body_qa), "table_cell_count": len(table_qa),
+        "body_overflow_count": sum(1 for x in body_qa if x.get("overflow")),
+        "table_overflow_count": sum(1 for x in table_qa if x.get("overflow")),
+        "body_overflows": [x for x in body_qa if x.get("overflow")][:500],
+        "table_overflows": [x for x in table_qa if x.get("overflow")][:500],
+        "small_body": [x for x in body_qa if x.get("font_used", 99) < 7.0][:500],
+        "small_table": [x for x in table_qa if x.get("font_used", 99) < 5.3][:500],
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    qa_path.write_text(json.dumps(qa, ensure_ascii=False, indent=2), encoding="utf-8")
+    return qa
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024*1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def validate(source_path: Path, output_path: Path, pages: list[int] | None, qa_path: Path, validation_path: Path) -> dict:
+    source = fitz.open(source_path)
+    output = fitz.open(output_path)
+    page_numbers = pages or list(range(1, source.page_count+1))
+    geometry = []
+    image_mismatch = []
+    residual = []
+    prohibited = ["스코프", "애플리케이션.", "지상 비행체", "방사 민감성", "방사 감수성", "전도성 방출", "하위 시스템", "서브시스템", "전원 리드", "요구 사항", "테스트 사이트"]
+    for out_i, pno in enumerate(page_numbers):
+        sp, op = source[pno-1], output[out_i]
+        if tuple(sp.mediabox) != tuple(op.mediabox) or sp.rotation != op.rotation:
+            geometry.append(pno)
+        if len(sp.get_images(full=True)) != len(op.get_images(full=True)):
+            image_mismatch.append({"page": pno, "source": len(sp.get_images(full=True)), "output": len(op.get_images(full=True))})
+        text = op.get_text("text")
+        bad = [x for x in prohibited if x in text]
+        if bad:
+            residual.append({"page": pno, "prohibited": bad})
+    qa = json.loads(qa_path.read_text(encoding="utf-8"))
+    result = {
+        "source_pages": source.page_count, "output_pages": output.page_count,
+        "expected_pages": len(page_numbers), "page_count_equal": output.page_count == len(page_numbers),
+        "geometry_mismatch_pages": geometry, "image_count_mismatch_pages": image_mismatch,
+        "body_overflow_count": qa["body_overflow_count"], "table_overflow_count": qa["table_overflow_count"],
+        "prohibited_terminology_pages": residual,
+        "sha256": sha256(output_path),
+    }
+    result["validated"] = bool(result["page_count_equal"] and not geometry and not image_mismatch and not residual and qa["body_overflow_count"] == 0 and qa["table_overflow_count"] == 0)
+    validation_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    source.close(); output.close()
+    return result
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--source", required=True)
+    ap.add_argument("--output", required=True)
