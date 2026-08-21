@@ -116,6 +116,7 @@ rev.STANDARD_REPLACEMENTS = rev.STANDARD_REPLACEMENTS + (
 )
 
 _original_post_edit = rev.post_edit
+_original_page_tables = rev.page_tables
 
 
 def reviewed_post_edit(source: str, translated: str) -> str:
@@ -129,7 +130,41 @@ def reviewed_post_edit(source: str, translated: str) -> str:
     return out
 
 
+def reviewed_page_tables(page):
+    """Reject graph grids and technical diagrams falsely detected as tables.
+
+    PyMuPDF's generic table detector correctly finds the document's actual tables,
+    but dense graph grids and chamber drawings can also look tabular.  The false
+    positives are sparse or consist mostly of one-character fragments.  Keeping
+    those as ordinary page text preserves the graph/diagram and prevents tiny-cell
+    clipping while still translating its labels through the normal text path.
+    """
+    kept = []
+    for table in _original_page_tables(page):
+        rows = len(table.rows)
+        cols = max((len(row.cells) for row in table.rows), default=0)
+        cell_count = rows * cols
+        extracted = table.extract()
+        values = [str(cell or "").strip() for row in extracted for cell in row]
+        nonempty = [value for value in values if value]
+        density = len(nonempty) / max(1, cell_count)
+        average_chars = sum(len(value) for value in nonempty) / max(1, len(nonempty))
+
+        # Single-row label boxes are better handled as ordinary figure labels.
+        if rows < 2 or cols < 2:
+            continue
+        # Diagrams and graphs produce very sparse pseudo-cells.
+        if density < 0.15:
+            continue
+        # Dense graph grids have many cells but only tiny character fragments.
+        if cell_count >= 80 and average_chars < 8.0:
+            continue
+        kept.append(table)
+    return kept
+
+
 rev.post_edit = reviewed_post_edit
+rev.page_tables = reviewed_page_tables
 
 if __name__ == "__main__":
     rev.main()
