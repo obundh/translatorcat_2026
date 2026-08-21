@@ -7,6 +7,12 @@ on:
     paths:
       - 'scripts/test_nllb_enko_v2.py'
       - '.github/workflows/test_nllb_enko_v2.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/test_nllb_enko_v2.py'
+      - '.github/workflows/test_nllb_enko_v2.yml'
   workflow_dispatch:
 
 permissions:
