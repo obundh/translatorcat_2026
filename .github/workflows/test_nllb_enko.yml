@@ -1,0 +1,38 @@
+name: Test NLLB English-Korean quality
+
+on:
+  push:
+    branches:
+      - automation/milstd461h-ko-revision2
+    paths:
+      - 'scripts/test_nllb_enko.py'
+      - '.github/workflows/test_nllb_enko.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      HF_HUB_DISABLE_XET: '1'
+      HF_HUB_ENABLE_HF_TRANSFER: '0'
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: nllb-enko-test-v1
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ctranslate2 transformers sentencepiece huggingface_hub
+      - name: Run translation samples
+        run: python scripts/test_nllb_enko.py
