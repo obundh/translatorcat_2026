@@ -1,0 +1,162 @@
+            for fut in concurrent.futures.as_completed(futures):
+                source = futures[fut]
+                try:
+                    out = fut.result()
+                except Exception:
+                    # A sequential retry is usually enough after a burst rate limit.
+                    out = self.translate_one(source)
+                with self.lock:
+                    self.cache[source] = out
+                    completed += 1
+                    if completed % 50 == 0 or completed == len(pending):
+                        self.flush()
+                        elapsed = max(1.0, time.time() - start)
+                        print(f"Translated {completed}/{len(pending)} ({completed/elapsed:.2f}/s)", flush=True)
+
+    def flush(self) -> None:
+        tmp = self.cache_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.cache, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(self.cache_path)
+
+    def get(self, text: str) -> str:
+        return self.cache.get(text, exact_lookup(text) or text)
+
+
+def infer_rotation(line: dict) -> int:
+    dx, dy = line.get("dir", (1.0, 0.0))
+    angle = int(round(math.degrees(math.atan2(-dy, dx)))) % 360
+    if angle <= 5 or angle >= 355:
+        return 0
+    if 85 <= angle <= 95:
+        return 90
+    if 175 <= angle <= 185:
+        return 180
+    if 265 <= angle <= 275:
+        return 270
+    return angle
+
+
+def extract_lines(page: fitz.Page) -> list[Line]:
+    result: list[Line] = []
+    data = page.get_text("dict", flags=fitz.TEXTFLAGS_DICT)
+    for bi, block in enumerate(data.get("blocks", [])):
+        if block.get("type") != 0:
+            continue
+        for li, line in enumerate(block.get("lines", [])):
+            spans = line.get("spans", [])
+            if not spans:
+                continue
+            text = "".join(span.get("text", "") for span in spans)
+            nonempty = [s for s in spans if s.get("text", "").strip()]
+            sizes = [float(s.get("size", 9.0)) for s in nonempty] or [9.0]
+            colors = [rgb(int(s.get("color", 0))) for s in nonempty] or [(0, 0, 0)]
+            bold = any("bold" in s.get("font", "").lower() or (int(s.get("flags", 0)) & 16) for s in nonempty)
+            italic = any("italic" in s.get("font", "").lower() or (int(s.get("flags", 0)) & 2) for s in nonempty)
+            color = tuple(statistics.median(c[i] for c in colors) for i in range(3))
+            result.append(Line(
+                text=text,
+                bbox=tuple(float(x) for x in line["bbox"]),
+                font_size=statistics.median(sizes),
+                bold=bold,
+                italic=italic,
+                color=color,
+                rotation=infer_rotation(line),
+                block_no=bi,
+                line_no=li,
+            ))
+    return result
+
+
+def is_header_footer(line: Line, page: fitz.Page) -> bool:
+    t = norm(line.text)
+    if not t:
+        return True
+    if line.bbox[1] < 58 and (t == "MIL-STD-461H" or re.fullmatch(r"MIL-STD-461H\s*", t)):
+        return True
+    if line.bbox[1] > page.rect.height - 55:
+        if re.fullmatch(r"[ivxlcdmIVXLCDM]+|\d+", t):
+            return True
+        # Footer is translated separately.
+        if t.startswith("Downloaded from"):
+            return False
+    return False
+
+
+def overlaps(rect: Sequence[float], other: Sequence[float], ratio: float = 0.35) -> bool:
+    a, b = fitz.Rect(rect), fitz.Rect(other)
+    inter = a & b
+    if inter.is_empty:
+        return False
+    return (inter.width * inter.height) / max(1.0, a.width * a.height) >= ratio
+
+
+def find_real_tables(page: fitz.Page) -> list:
+    try:
+        tables = list(page.find_tables().tables)
+    except Exception:
+        return []
+    kept = []
+    for table in tables:
+        rows = len(table.rows)
+        cols = max((len(row.cells) for row in table.rows), default=0)
+        cells = rows * cols
+        if rows < 2 or cols < 2 or cells < 4:
+            continue
+        extracted = table.extract()
+        values = [norm(str(cell or "")) for row in extracted for cell in row]
+        nonempty = [v for v in values if v]
+        density = len(nonempty) / max(1, cells)
+        avg_chars = sum(len(v) for v in nonempty) / max(1, len(nonempty))
+        area = fitz.Rect(table.bbox).width * fitz.Rect(table.bbox).height
+        if area < 800:
+            continue
+        # Graph grids and diagrams are sparse pseudo-tables.
+        if density < 0.22:
+            continue
+        if cells >= 60 and avg_chars < 6.0:
+            continue
+        # Very large page-spanning grids are almost always figures.
+        if cells >= 100 and area > page.rect.width * page.rect.height * 0.35:
+            continue
+        kept.append(table)
+    return kept
+
+
+def logical_units(page: fitz.Page, page_no: int, table_bboxes: list[Sequence[float]]) -> list[Unit]:
+    lines = extract_lines(page)
+    by_block: dict[int, list[Line]] = {}
+    for line in lines:
+        if is_header_footer(line, page):
+            continue
+        if any(overlaps(line.bbox, tb, 0.30) for tb in table_bboxes):
+            continue
+        by_block.setdefault(line.block_no, []).append(line)
+    units: list[Unit] = []
+    for block_lines in by_block.values():
+        block_lines.sort(key=lambda x: (x.bbox[1], x.bbox[0]))
+        block_width = max(x.bbox[2] for x in block_lines) - min(x.bbox[0] for x in block_lines)
+        if block_width < 180 or any(x.rotation != 0 for x in block_lines):
+            for line in block_lines:
+                t = norm(line.text)
+                if not t:
+                    continue
+                kind = "heading" if line.bold or SECTION_RE.match(t) else "label"
+                units.append(Unit(t, line.bbox, line.font_size, line.bold, line.italic, line.color, line.rotation, kind, page_no))
+            continue
+        current: list[Line] = []
+        current_kind = "paragraph"
+
+        def flush() -> None:
+            nonlocal current, current_kind
+            if not current:
+                return
+            text = " ".join(norm(x.text) for x in current if norm(x.text)).strip()
+            if text:
+                bbox = (
+                    min(x.bbox[0] for x in current), min(x.bbox[1] for x in current),
+                    max(x.bbox[2] for x in current), max(x.bbox[3] for x in current),
+                )
+                units.append(Unit(
+                    text=text,
+                    bbox=bbox,
+                    font_size=statistics.median(x.font_size for x in current),
