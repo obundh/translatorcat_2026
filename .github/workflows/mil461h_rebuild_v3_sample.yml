@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - '.github/mil461h/v3_src/**'
+      - '.github/mil461h/mil461h_rebuild_v3.py.gz.b64'
       - '.github/workflows/mil461h_rebuild_v3_sample.yml'
   workflow_dispatch:
 
@@ -30,15 +30,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install 'pymupdf==1.26.7' requests pillow numpy
-      - name: Assemble rebuild engine
+      - name: Decode rebuild engine
         run: |
           mkdir -p scripts work output renders
-          cat .github/mil461h/v3_src/src_*.part > scripts/mil461h_rebuild_v3.py
           python - <<'PY'
+          import base64, gzip
           from pathlib import Path
+          src=Path('.github/mil461h/mil461h_rebuild_v3.py.gz.b64')
           dst=Path('scripts/mil461h_rebuild_v3.py')
+          dst.write_bytes(gzip.decompress(base64.b64decode(src.read_text().strip())))
           compile(dst.read_text(encoding='utf-8'), str(dst), 'exec')
-          print('Assembled rebuild engine:', dst.stat().st_size, 'bytes')
+          print('Decoded rebuild engine:', dst.stat().st_size, 'bytes')
           PY
       - name: Download and verify MIL-STD-461H source
         run: |
@@ -63,7 +65,7 @@ jobs:
             --workers 8
       - name: Render and build contact sheet
         run: |
-          pdftoppm -r 125 -png output/MIL461H_KO_V3_SAMPLE.pdf renders/page >/dev/null 2>&1
+          pdftoppm -r 140 -png output/MIL461H_KO_V3_SAMPLE.pdf renders/page >/dev/null 2>&1
           python - <<'PY'
           from pathlib import Path
           from PIL import Image, ImageDraw
@@ -84,7 +86,7 @@ jobs:
           sheet=Image.new('RGB',(thumb_w*cols,cell_h*rows),'white')
           for idx,img in enumerate(thumbs):
               sheet.paste(img,((idx%cols)*thumb_w,(idx//cols)*cell_h))
-          sheet.save('output/MIL461H_KO_V3_SAMPLE_CONTACT_SHEET.jpg',quality=90)
+          sheet.save('output/MIL461H_KO_V3_SAMPLE_CONTACT_SHEET.jpg',quality=92)
           PY
           ls -lh output
       - name: Upload sample review artifact
