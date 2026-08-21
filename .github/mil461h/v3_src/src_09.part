@@ -1,0 +1,13 @@
+    ap.add_argument("--cache", required=True)
+    ap.add_argument("--qa", required=True)
+    ap.add_argument("--validation", required=True)
+    ap.add_argument("--pages", default="")
+    ap.add_argument("--workers", type=int, default=8)
+    args = ap.parse_args()
+    pages = [int(x.strip()) for x in args.pages.split(",") if x.strip()] if args.pages else None
+    qa = rebuild(Path(args.source), Path(args.output), Path(args.cache), Path(args.qa), pages, args.workers)
+    result = validate(Path(args.source), Path(args.output), pages, Path(args.qa), Path(args.validation))
+    print(json.dumps({"qa": {"body_overflow_count": qa["body_overflow_count"], "table_overflow_count": qa["table_overflow_count"]}, "validation": result}, ensure_ascii=False, indent=2), flush=True)
+
+if __name__ == "__main__":
+    main()
