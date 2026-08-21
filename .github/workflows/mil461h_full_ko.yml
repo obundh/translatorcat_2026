@@ -7,6 +7,12 @@ on:
     paths:
       - 'scripts/mil461h_full_ko.py'
       - '.github/workflows/mil461h_full_ko.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/mil461h_full_ko.py'
+      - '.github/workflows/mil461h_full_ko.yml'
   workflow_dispatch:
 
 permissions:
