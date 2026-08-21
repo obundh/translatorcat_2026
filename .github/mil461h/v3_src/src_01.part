@@ -1,0 +1,167 @@
+from __future__ import annotations
+
+import argparse
+import concurrent.futures
+import hashlib
+import json
+import math
+import os
+import re
+import statistics
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Sequence
+
+import fitz
+import requests
+
+# -----------------------------
+# Document constants / glossary
+# -----------------------------
+
+REGULAR_FONT_CANDIDATES = (
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+)
+BOLD_FONT_CANDIDATES = (
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/nanum/NanumBarunGothicBold.ttf",
+    "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
+)
+
+EXACT = {
+    "METRIC": "미터법",
+    "SUPERSEDING": "대체 문서",
+    "DEPARTMENT OF DEFENSE": "미국 국방부",
+    "INTERFACE STANDARD": "인터페이스 표준",
+    "DEPARTMENT OF DEFENSE INTERFACE STANDARD": "미국 국방부 인터페이스 표준",
+    "REQUIREMENTS FOR THE CONTROL OF ELECTROMAGNETIC INTERFERENCE CHARACTERISTICS OF SUBSYSTEMS AND EQUIPMENT": "하위체계 및 장비의 전자기 간섭 특성 관리 요구사항",
+    "DISTRIBUTION STATEMENT A. Approved for public release; distribution is unlimited.": "배포문 A. 공개 배포 승인; 배포에 제한 없음.",
+    "FOREWORD": "서문",
+    "CONTENTS": "목차",
+    "PARAGRAPH": "항목",
+    "PAGE": "쪽",
+    "FIGURES": "그림 목록",
+    "TABLES": "표 목록",
+    "SCOPE": "적용범위",
+    "Purpose.": "목적.",
+    "Application.": "적용.",
+    "General applicability.": "일반 적용성.",
+    "Tailoring of requirements.": "요구사항 조정.",
+    "Structure.": "구성.",
+    "Emission and susceptibility designations.": "방출 및 내성 표기.",
+    "APPLICABLE PUBLICATIONS": "적용 문서",
+    "General.": "일반.",
+    "Government publications.": "정부 문서.",
+    "Other Government publications.": "그 밖의 정부 문서.",
+    "Non-Government publications.": "비정부 문서.",
+    "Order of precedence.": "우선순위.",
+    "DEFINITIONS": "정의",
+    "GENERAL REQUIREMENTS": "일반 요구사항",
+    "Interface requirements.": "인터페이스 요구사항.",
+    "Joint procurement.": "공동 조달.",
+    "Filtering (Navy only).": "필터링(해군만 해당).",
+    "Self-compatibility.": "자기 적합성.",
+    "Non-developmental items (NDI).": "비개발품(NDI).",
+    "Commercial items (CI).": "상용품(CI).",
+    "Selected by contractor.": "계약자가 선정한 경우.",
+    "Specified by procuring activity.": "조달기관이 지정한 경우.",
+    "Government furnished equipment (GFE).": "정부 제공 장비(GFE).",
+    "Switching transients.": "스위칭 과도현상.",
+    "Interchangeable modular equipment.": "상호교환식 모듈형 장비.",
+    "Verification requirements.": "검증 요구사항.",
+    "Measurement tolerances.": "측정 허용오차.",
+    "Shielded enclosures.": "차폐실.",
+    "Radio frequency (RF) absorber material.": "무선주파수(RF) 흡수체.",
+    "Other test sites.": "그 밖의 시험장소.",
+    "Ambient electromagnetic level.": "주변 전자기 레벨.",
+    "Ground plane.": "접지면.",
+    "Metallic ground plane.": "금속 접지면.",
+    "Composite ground plane.": "복합재 접지면.",
+    "Power source impedance.": "전원 임피던스.",
+    "General test precautions.": "일반 시험 주의사항.",
+    "Accessory equipment.": "부속장비.",
+    "Excess personnel and equipment.": "불필요한 인원 및 장비.",
+    "Overload precautions.": "과부하 방지조치.",
+    "RF hazards.": "RF 위해.",
+    "Shock hazard.": "감전 위험.",
+    "Federal Communications Commission (FCC) restrictions.": "미국 연방통신위원회(FCC) 제한.",
+    "EUT test configurations.": "EUT 시험 구성.",
+    "EUT design status.": "EUT 설계 상태.",
+    "Bonding of EUT.": "EUT 본딩.",
+    "Shock and vibration isolators.": "충격 및 진동 절연체.",
+    "Safety grounds.": "안전접지.",
+    "Orientation of EUTs.": "EUT 방향.",
+    "Construction and arrangement of EUT cables.": "EUT 케이블의 구성 및 배치.",
+    "Electrical and mechanical interfaces.": "전기적·기계적 인터페이스.",
+    "Operation of EUT.": "EUT 운용.",
+    "Use of measurement equipment.": "측정장비 사용.",
+    "Detector.": "검파기.",
+    "Computer-controlled instrumentation.": "컴퓨터 제어 계측기.",
+    "Emission testing.": "방출 시험.",
+    "Bandwidths.": "대역폭.",
+    "Emission identification.": "방출 식별.",
+    "Frequency scanning.": "주파수 스캔.",
+    "Emission data presentation.": "방출 자료 제시.",
+    "Susceptibility testing.": "내성 시험.",
+    "Modulation of susceptibility signals.": "내성 시험신호의 변조.",
+    "Thresholds of susceptibility.": "내성 임계값.",
+    "Calibration of measuring equipment.": "측정장비 교정.",
+    "Signal generators.": "신호발생기.",
+    "Power amplifiers.": "전력증폭기.",
+    "Transmit antennas.": "송신 안테나.",
+    "Receive antennas.": "수신 안테나.",
+    "Measurement receiver.": "측정수신기.",
+    "Power meter.": "전력계.",
+    "Directional coupler.": "방향성 결합기.",
+    "Attenuator.": "감쇠기.",
+    "Data recording device.": "자료 기록장치.",
+    "Current probe.": "전류 프로브.",
+    "Injection probe.": "주입 프로브.",
+    "Monitor probe.": "감시 프로브.",
+    "DETAILED REQUIREMENTS": "세부 요구사항",
+    "Units of frequency domain measurements.": "주파수영역 측정 단위.",
+    "EMI control requirements versus intended installations.": "의도된 설치환경별 EMI 관리 요구사항.",
+    "Emission and susceptibility requirements, limits, and test procedures.": "방출·내성 요구사항, 한계값 및 시험 절차.",
+    "Applicability.": "적용성.",
+    "Limit.": "한계값.",
+    "Limits.": "한계값.",
+    "Test procedure.": "시험 절차.",
+    "Test procedures.": "시험 절차.",
+    "Test equipment.": "시험 장비.",
+    "Setup.": "시험 구성.",
+    "Procedures.": "절차.",
+    "Data presentation.": "자료 제시.",
+    "NOTES": "주",
+    "Intended use.": "사용 목적.",
+    "Acquisition requirements.": "조달 요구사항.",
+    "Associated Data Item Descriptions (DIDs).": "관련 자료항목기술서(DID).",
+    "Technical points of contact.": "기술 문의처.",
+    "Changes from previous issue.": "이전 판 대비 변경사항.",
+    "APPENDIX A": "부록 A",
+    "CONCLUDING MATERIAL": "마무리 자료",
+    "Frequency": "주파수",
+    "Minimum absorption": "최소 흡수성능",
+    "TABLE I. Absorption at normal incidence.": "표 I. 수직 입사 시 흡수성능.",
+    "TABLE I.  Absorption at normal incidence.": "표 I. 수직 입사 시 흡수성능.",
+    "CURVE #1": "곡선 #1",
+    "CURVE #2": "곡선 #2",
+    "Frequency (Hz)": "주파수(Hz)",
+    "Limit Level (dBµA)": "한계 레벨(dBµA)",
+    "LIMIT LEVEL (dBµA)": "한계 레벨(dBµA)",
+    "NOMINAL EUT SOURCE VOLTAGE (AC AND DC)": "EUT 정격 전원전압(AC/DC)",
+    "APPLICABLE CURVE": "적용 곡선",
+    "ABOVE 28 VOLTS": "28 V 초과",
+    "28 VOLTS OR BELOW": "28 V 이하",
+    "ALL": "전체",
+    "Optional": "선택사항",
+}
+
+# Common requirement descriptions. Codes and numerical designators stay unchanged.
+EXACT.update({
+    "CE101, conducted emissions, audio frequency currents, power leads.": "CE101, 전도 방출, 전원선의 음성주파수 전류.",
+    "CE102, conducted emissions, radio frequency potential, power leads.": "CE102, 전도 방출, 전원선의 무선주파수 전위.",
+    "CE106, conducted emissions, antenna port.": "CE106, 전도 방출, 안테나 포트.",
