@@ -1,0 +1,115 @@
+name: MIL-STD-461H Korean revision 2 full PR build
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'scripts/mil461h_revision2.py'
+      - 'scripts/mil461h_revision2_full.py'
+      - '.github/workflows/mil461h_revision2_full_pr.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install readable Korean fonts and PDF tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-nanum fonts-noto-cjk poppler-utils zip
+      - name: Install CPU translation and PDF dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install 'transformers==4.53.3' sentencepiece sacremoses safetensors protobuf 'ctranslate2==4.6.0' 'pymupdf==1.26.7' pillow numpy
+      - name: Cache converted NLLB EN-KO model
+        uses: actions/cache@v4
+        id: model-cache
+        with:
+          path: work/model
+          key: mil461h-nllb-enko-ct2-int8-v2
+      - name: Convert specialized EN-KO model
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p work/model
+          ct2-transformers-converter \
+            --model NHNDQ/nllb-finetuned-en2ko \
+            --output_dir work/model \
+            --quantization int8 \
+            --force
+      - name: Download and verify MIL-STD-461H source
+        run: |
+          mkdir -p work output
+          curl --retry 5 --retry-delay 5 -fL \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o work/MIL_STD_461H_2026_EN.pdf
+          python - <<'PY'
+          import fitz
+          d=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          assert d.page_count == 294, d.page_count
+          print('Source verified:', d.page_count)
+          PY
+      - name: Translate and rebuild all 294 pages
+        run: |
+          python scripts/mil461h_revision2_full.py \
+            --source work/MIL_STD_461H_2026_EN.pdf \
+            --model-dir work/model \
+            --outdir output
+      - name: Verify full output
+        run: |
+          python - <<'PY'
+          import fitz, json, pathlib
+          out=pathlib.Path('output')
+          pdf=out/'MIL_STD_461H_2026_KO_REVISION2.pdf'
+          qa=json.loads((out/'MIL_STD_461H_2026_KO_REVISION2_QA.json').read_text())
+          val=json.loads((out/'MIL_STD_461H_2026_KO_REVISION2_VALIDATION.json').read_text())
+          assert pdf.exists() and pdf.stat().st_size > 1_000_000
+          d=fitz.open(pdf)
+          assert d.page_count == 294
+          assert qa['body_overflow_count'] == 0, qa.get('body_overflows', [])[:10]
+          assert qa['table_overflow_count'] == 0, qa.get('table_overflows', [])[:10]
+          assert not qa.get('page_issues'), qa.get('page_issues', [])[:10]
+          assert val['page_count_equal']
+          assert not val['geometry_mismatch_pages']
+          assert not val['image_count_mismatch_pages']
+          print('Verified', pdf, pdf.stat().st_size)
+          PY
+      - name: Package deliverables
+        run: |
+          cp work/MIL_STD_461H_2026_EN.pdf output/MIL_STD_461H_2026_EN_ORIGINAL.pdf
+          cd output
+          sha256sum MIL_STD_461H_2026_KO_REVISION2.pdf MIL_STD_461H_2026_KO_REVISION2_QA.json MIL_STD_461H_2026_KO_REVISION2_VALIDATION.json > SHA256SUMS_FINAL.txt
+          zip -9 MIL_STD_461H_2026_KO_REVISION2_PACKAGE.zip \
+            MIL_STD_461H_2026_KO_REVISION2.pdf \
+            MIL_STD_461H_2026_EN_ORIGINAL.pdf \
+            MIL_STD_461H_2026_KO_REVISION2_QA.json \
+            MIL_STD_461H_2026_KO_REVISION2_VALIDATION.json \
+            MIL_STD_461H_2026_KO_REVISION2_COMPARISON.png \
+            SHA256SUMS_FINAL.txt
+          ls -lh
+      - name: Upload final revision
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIL_STD_461H_2026_KO_REVISION2_FINAL_PR
+          path: |
+            output/MIL_STD_461H_2026_KO_REVISION2.pdf
+            output/MIL_STD_461H_2026_KO_REVISION2_PACKAGE.zip
+            output/MIL_STD_461H_2026_KO_REVISION2_QA.json
+            output/MIL_STD_461H_2026_KO_REVISION2_VALIDATION.json
+            output/MIL_STD_461H_2026_KO_REVISION2_COMPARISON.png
+            output/SHA256SUMS_FINAL.txt
+          if-no-files-found: error
+          retention-days: 7
