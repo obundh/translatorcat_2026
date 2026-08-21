@@ -1,0 +1,89 @@
+name: MIL-STD-461H Korean revision 2 reviewed sample
+
+on:
+  push:
+    branches:
+      - automation/milstd461h-ko-revision2-20260821
+    paths:
+      - 'scripts/mil461h_revision2.py'
+      - 'scripts/mil461h_revision2_full.py'
+      - '.github/workflows/mil461h_revision2_review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install fonts and PDF tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-nanum fonts-noto-cjk poppler-utils
+      - name: Install CPU translation and PDF dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install 'transformers==4.53.3' sentencepiece sacremoses safetensors protobuf 'ctranslate2==4.6.0' 'pymupdf==1.26.7' pillow numpy
+      - name: Convert specialized EN-KO model
+        run: |
+          mkdir -p work/model output
+          ct2-transformers-converter \
+            --model NHNDQ/nllb-finetuned-en2ko \
+            --output_dir work/model \
+            --quantization int8 \
+            --force
+      - name: Download source PDF
+        run: |
+          curl --retry 5 --retry-delay 5 -fL \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o work/MIL_STD_461H_2026_EN.pdf
+          python - <<'PY'
+          import fitz
+          d=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          assert d.page_count == 294
+          print('Source verified:', d.page_count)
+          PY
+      - name: Build reviewed representative pages
+        run: |
+          python scripts/mil461h_revision2_full.py \
+            --source work/MIL_STD_461H_2026_EN.pdf \
+            --model-dir work/model \
+            --outdir output \
+            --pages '1,2,3,4,11,21,22,23,29,40,84,107,118,119,158,159,160,165,166,167,292,293,294'
+      - name: Gate layout and translation checks
+        run: |
+          python - <<'PY'
+          import json, pathlib, re, fitz
+          out=pathlib.Path('output')
+          qa=json.loads(next(out.glob('*SAMPLE_QA.json')).read_text())
+          val=json.loads(next(out.glob('*SAMPLE_VALIDATION.json')).read_text())
+          assert qa['body_overflow_count'] == 0, qa['body_overflows'][:5]
+          assert qa['table_overflow_count'] == 0, qa['table_overflows'][:5]
+          assert val['page_count_equal']
+          assert not val['geometry_mismatch_pages']
+          assert not val['image_count_mismatch_pages']
+          pdf=fitz.open(next(out.glob('*SAMPLE.pdf')))
+          text='\n'.join(p.get_text() for p in pdf)
+          prohibited=['방사선 감수성','방사형 감수성','감수성','서브시스템','하위 시스템','내비 전용','라인-투-그라운드','접지 평면','요구 사항']
+          bad=[x for x in prohibited if x in text]
+          assert not bad, bad
+          print('Reviewed sample gate passed')
+          PY
+      - name: Upload reviewed sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIL_STD_461H_KO_REVISION2_REVIEWED_SAMPLE
+          path: output/*
+          if-no-files-found: error
+          retention-days: 3
