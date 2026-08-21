@@ -1,0 +1,116 @@
+        if current:
+            lines.append(current)
+    y = bbox.y0 + size
+    for idx, line in enumerate(lines[:2]):
+        page.insert_text((x0, y), line, fontfile=fontfile, fontname="toctitle", fontsize=size, color=color, overlay=True)
+        if idx == len(lines[:2]) - 1:
+            title_width = font.text_length(line, fontsize=size)
+            start = x0 + title_width + 3
+            end = right - page_width - 3
+            dot_width = max(0.8, font.text_length(".", fontsize=size))
+            count = max(0, int((end - start) / dot_width))
+            if count:
+                page.insert_text((start, y), "." * count, fontfile=fontfile, fontname="tocdots", fontsize=size, color=color, overlay=True)
+            page.insert_text((right - page_width, y), page_label, fontfile=fontfile, fontname="tocpage", fontsize=size, color=color, overlay=True)
+        y += lineheight
+    return {"source": row["title"], "translation": translated, "bbox": list(bbox), "font_used": size, "overflow": len(lines) > 2}
+
+
+def compose_cover(page: fitz.Page, source_page: fitz.Page, regular_font: str, bold_font: str) -> list[dict]:
+    lines = extract_lines(source_page)
+    remove_text_and_artifacts(page, lines, keep_header_page=False)
+    placements = []
+    items = [
+        ((493, 19, 593, 38), "미터법", regular_font, 9.3, 1),
+        ((493, 44, 595, 105), "MIL-STD-461H\n2026년 4월 17일\n\nMIL-STD-461G 대체\n2015년 12월 11일", regular_font, 8.3, 0),
+        ((130, 150, 482, 202), "미국 국방부\n인터페이스 표준", bold_font, 13.0, 1),
+        ((65, 219, 548, 285), "하위체계 및 장비의 전자기 간섭 특성\n관리 요구사항", bold_font, 14.1, 1),
+        ((58, 546, 554, 578), "AMSC 10490                                      분야 EMCS\n배포문 A. 공개 배포 승인; 배포에 제한 없음.", regular_font, 7.6, 0),
+        ((90, 748, 522, 772), "https://ib-lenhardt.com에서 내려받음 | IBL-Lab GmbH - MIL-STD-461H / EMC 군용 시험 및 인증", regular_font, 5.5, 1),
+    ]
+    for bbox, text, fontfile, size, align in items:
+        spare = page.insert_textbox(fitz.Rect(bbox), text, fontfile=fontfile, fontname="cover", fontsize=size, lineheight=1.12, color=(0,0,0), align=align, overlay=True)
+        placements.append({"text": text, "bbox": list(bbox), "font_used": size, "overflow": spare < -0.05})
+    return placements
+
+
+def compose_toc(page: fitz.Page, source_page: fitz.Page, page_no: int, translator: GoogleTranslator, regular_font: str, bold_font: str) -> list[dict]:
+    lines = extract_lines(source_page)
+    rows = parse_toc_rows(source_page)
+    # Keep standard header/page number, replace all content and footer text.
+    remove_text_and_artifacts(page, lines, keep_header_page=True)
+    placements = []
+    for row in rows:
+        if row["kind"] == "heading":
+            text = translator.get(row["text"])
+            bbox = fitz.Rect(row["bbox"])
+            fontfile = bold_font
+            size = min(10.2, max(8.0, row.get("font_size", 9) * 0.92))
+            align = 1 if row["text"] == "CONTENTS" else 0
+            spare = page.insert_textbox(bbox, text, fontfile=fontfile, fontname="tocheading", fontsize=size, color=(0,0,0), align=align, overlay=True)
+            placements.append({"source": row["text"], "translation": text, "bbox": list(bbox), "font_used": size, "overflow": spare < -0.05})
+        elif row["kind"] == "entry":
+            translated = translator.get(row["title"])
+            placements.append(draw_toc_entry(page, row, translated, regular_font, bold_font))
+        else:
+            text = translator.get(row["text"])
+            bbox = fitz.Rect(row["bbox"])
+            size = min(8.0, max(6.5, row.get("font_size", 8) * 0.86))
+            spare = page.insert_textbox(bbox, text, fontfile=regular_font, fontname="toclabel", fontsize=size, lineheight=1.08, color=(0,0,0.85), align=0, overlay=True)
+            placements.append({"source": row["text"], "translation": text, "bbox": list(bbox), "font_used": size, "overflow": spare < -0.05})
+    # Footer translation.
+    footer = "https://ib-lenhardt.com에서 내려받음 | IBL-Lab GmbH - MIL-STD-461H / EMC 군용 시험 및 인증"
+    page.insert_textbox(fitz.Rect(90, page.rect.height - 33, page.rect.width - 90, page.rect.height - 15), footer, fontfile=regular_font, fontname="footer", fontsize=5.4, color=(0.35,0.35,0.35), align=1, overlay=True)
+    return placements
+
+
+def collect_texts(doc: fitz.Document, pages: list[int]) -> list[str]:
+    texts = []
+    seen = set()
+    for pno in pages:
+        page = doc[pno - 1]
+        if pno == 1:
+            continue
+        if 3 <= pno <= 14:
+            for row in parse_toc_rows(page):
+                key = row.get("title") or row.get("text")
+                if key and should_translate(key) and key not in seen:
+                    seen.add(key); texts.append(key)
+            continue
+        tables = find_real_tables(page)
+        tbboxes = [t.bbox for t in tables]
+        for unit in logical_units(page, pno, tbboxes):
+            if should_translate(unit.text) and unit.text not in seen:
+                seen.add(unit.text); texts.append(unit.text)
+        for table in tables:
+            for row in table.extract():
+                for cell in row:
+                    t = norm(str(cell or ""))
+                    if should_translate(t) and t not in seen:
+                        seen.add(t); texts.append(t)
+        footer = "Downloaded from https://ib-lenhardt.com | IBL-Lab GmbH - MIL-STD-461H / EMC Military Testing & Certification"
+        if footer not in seen:
+            seen.add(footer); texts.append(footer)
+    return texts
+
+
+def compose_page(page: fitz.Page, source_page: fitz.Page, page_no: int, translator: GoogleTranslator, regular_font: str, bold_font: str) -> tuple[list[dict], list[dict]]:
+    tables = find_real_tables(source_page)
+    tbboxes = [t.bbox for t in tables]
+    units = logical_units(source_page, page_no, tbboxes)
+    lines = extract_lines(source_page)
+    remove_text_and_artifacts(page, lines, keep_header_page=True)
+    body_qa = []
+    table_qa = []
+    # Redraw real table cells after source text removal; line art remains intact.
+    for table in tables:
+        extracted = table.extract()
+        for ri, row in enumerate(table.rows):
+            for ci, cell_bbox in enumerate(row.cells):
+                if cell_bbox is None:
+                    continue
+                source_text = ""
+                if ri < len(extracted) and ci < len(extracted[ri]):
+                    source_text = norm(str(extracted[ri][ci] or ""))
+                if not source_text:
+                    continue
