@@ -8,6 +8,13 @@ on:
       - '.github/milstd461h/milstd461h_v2.py.gz.b64'
       - 'scripts/milstd461h_v2_revision.py'
       - '.github/workflows/mil461h_v2_full.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/milstd461h/milstd461h_v2.py.gz.b64'
+      - 'scripts/milstd461h_v2_revision.py'
+      - '.github/workflows/mil461h_v2_full.yml'
   workflow_dispatch:
 
 permissions:
