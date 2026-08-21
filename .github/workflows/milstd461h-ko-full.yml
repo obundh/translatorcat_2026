@@ -1,0 +1,87 @@
+name: Build full Korean MIL-STD-461H layout translation
+
+on:
+  push:
+    branches:
+      - automation/milstd461h-ko-full-20260821
+    paths-ignore:
+      - milstd461h_run.json
+
+permissions:
+  contents: write
+
+env:
+  ARTIFACT_NAME: milstd461h-ko-full-original-layout
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout isolated branch
+        uses: actions/checkout@v4
+        with:
+          ref: automation/milstd461h-ko-full-20260821
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PDF and Korean font dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-nanum poppler-utils
+          python -m pip install --upgrade pip
+          python -m pip install pymupdf==1.26.7 requests pillow
+
+      - name: Restore translation builder
+        run: |
+          mkdir -p /tmp/milstd461h
+          base64 -d .github/milstd461h/milstd461h_full_ko.py.gz.b64 | gzip -d > /tmp/milstd461h/milstd461h_full_ko.py
+          python -m py_compile /tmp/milstd461h/milstd461h_full_ko.py
+
+      - name: Download the public MIL-STD-461H source PDF
+        run: |
+          curl -L --fail --retry 5 --retry-delay 3 -A 'Mozilla/5.0' \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o /tmp/milstd461h/MIL-STD-461H_2026.pdf
+          test "$(stat -c%s /tmp/milstd461h/MIL-STD-461H_2026.pdf)" -gt 1000000
+
+      - name: Translate every text object and rebuild the 294-page PDF
+        run: |
+          mkdir -p dist/work
+          python /tmp/milstd461h/milstd461h_full_ko.py \
+            --src /tmp/milstd461h/MIL-STD-461H_2026.pdf \
+            --out dist/MIL_STD_461H_KO_FULL_ORIGINAL_LAYOUT.pdf \
+            --workdir dist/work \
+            --workers 5
+          pdfinfo dist/MIL_STD_461H_KO_FULL_ORIGINAL_LAYOUT.pdf | tee dist/pdfinfo.txt
+          test "$(pdfinfo dist/MIL_STD_461H_KO_FULL_ORIGINAL_LAYOUT.pdf | awk '/^Pages:/ {print $2}')" = '294'
+
+      - name: Upload translated PDF and verification material
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            dist/MIL_STD_461H_KO_FULL_ORIGINAL_LAYOUT.pdf
+            dist/pdfinfo.txt
+            dist/work/translation_audit.json
+            dist/work/visual_validation.json
+            dist/work/layout_comparison_contact_sheet.png
+            dist/work/translation_cache.json
+          compression-level: 6
+          retention-days: 7
+
+      - name: Publish run locator
+        if: always()
+        run: |
+          printf '{"run_id": %s, "run_attempt": %s, "status": "%s", "artifact_name": "%s", "commit": "%s"}\n' \
+            '${{ github.run_id }}' '${{ github.run_attempt }}' '${{ job.status }}' '${{ env.ARTIFACT_NAME }}' '${{ github.sha }}' \
+            > milstd461h_run.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add milstd461h_run.json
+          git commit -m '[skip ci] Record MIL-STD-461H translation build run ${{ github.run_id }}' || true
+          git push origin HEAD:automation/milstd461h-ko-full-20260821
