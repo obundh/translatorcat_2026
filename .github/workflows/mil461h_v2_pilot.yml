@@ -1,0 +1,64 @@
+name: Build MIL-STD-461H Korean v2 pilot
+
+on:
+  push:
+    branches:
+      - automation/mil461h-ko-v2-20260821
+    paths:
+      - 'scripts/mil461h_full_ko_v2.py'
+      - '.github/workflows/mil461h_v2_pilot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HF_HUB_DISABLE_XET: '1'
+      HF_HUB_ENABLE_HF_TRANSFER: '0'
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install fonts and dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-nanum fonts-noto-cjk poppler-utils
+          python -m pip install --upgrade pip
+          python -m pip install 'ctranslate2==4.8.1' 'transformers==4.53.3' sentencepiece huggingface_hub 'pymupdf==1.26.7' pillow numpy
+      - name: Download source
+        run: |
+          mkdir -p work output
+          curl --retry 5 --retry-delay 5 -fL \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o work/MIL_STD_461H_2026_EN.pdf
+          python - <<'PY'
+          import fitz
+          d=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          assert d.page_count == 294, d.page_count
+          PY
+      - name: Build selected-page pilot
+        run: |
+          python scripts/mil461h_full_ko_v2.py \
+            --source work/MIL_STD_461H_2026_EN.pdf \
+            --output output/MIL461H_KO_V2_PILOT.pdf \
+            --cache output/translation_cache_v2.json \
+            --qa output/MIL461H_KO_V2_PILOT_QA.json \
+            --comparison output/MIL461H_KO_V2_PILOT_COMPARISON.png \
+            --pages '1,2,3,4,21,22,159,160,161,292,293,294'
+      - name: Package pilot
+        run: |
+          cd output
+          zip -9 MIL461H_KO_V2_PILOT_PACKAGE.zip MIL461H_KO_V2_PILOT.pdf MIL461H_KO_V2_PILOT_QA.json MIL461H_KO_V2_PILOT_COMPARISON.png translation_cache_v2.json MIL461H_KO_V2_PILOT.pdf.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIL461H_KO_V2_PILOT
+          path: output/*
+          if-no-files-found: error
+          retention-days: 3
