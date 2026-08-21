@@ -165,3 +165,4 @@ EXACT.update({
     "CE101, conducted emissions, audio frequency currents, power leads.": "CE101, 전도 방출, 전원선의 음성주파수 전류.",
     "CE102, conducted emissions, radio frequency potential, power leads.": "CE102, 전도 방출, 전원선의 무선주파수 전위.",
     "CE106, conducted emissions, antenna port.": "CE106, 전도 방출, 안테나 포트.",
+    "CS101, conducted susceptibility, power leads.": "CS101, 전도 내성, 전원선.",
