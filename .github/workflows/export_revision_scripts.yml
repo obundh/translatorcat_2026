@@ -1,0 +1,26 @@
+name: Export MIL-STD-461H revision scripts
+
+on:
+  push:
+    branches:
+      - automation/milstd461h-ko-revision2-20260821
+    paths:
+      - '.github/workflows/export_revision_scripts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIL461H_REVISION_SCRIPTS
+          path: |
+            scripts/mil461h_revision2.py
+            scripts/mil461h_revision2_full.py
+          if-no-files-found: error
+          retention-days: 2
