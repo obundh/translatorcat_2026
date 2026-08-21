@@ -1,0 +1,183 @@
+def should_translate(text: str) -> bool:
+    t = norm(text)
+    if not t or not re.search(r"[A-Za-z]{2,}", t):
+        return False
+    if re.fullmatch(r"(?:MIL-STD-\d+[A-Z]?|(?:CE|CS|RE|RS)\d{3}(?:-\d+)?|[A-Z0-9/._-]{2,})", t):
+        return False
+    if FORMULA_RE.fullmatch(t) and not re.search(r"[A-Za-z]{4,}\s+[A-Za-z]{3,}", t):
+        return False
+    return True
+
+
+def protect(text: str) -> tuple[str, dict[str, str]]:
+    mapping: dict[str, str] = {}
+    count = 0
+
+    def token(value: str) -> str:
+        nonlocal count
+        key = f"ZXQPH{count:04d}QXZ"
+        count += 1
+        mapping[key] = value
+        return key
+
+    work = text
+    # Replace domain terms first; restore to approved Korean terminology later.
+    for phrase, korean in sorted(TERM_MAP.items(), key=lambda x: len(x[0]), reverse=True):
+        pattern = re.compile(re.escape(phrase), re.I)
+        while True:
+            m = pattern.search(work)
+            if not m:
+                break
+            key = token(korean)
+            work = work[:m.start()] + key + work[m.end():]
+    # Protect codes, references, URLs, units, and numbers.
+    pos = 0
+    parts: list[str] = []
+    for m in PRESERVE_RE.finditer(work):
+        parts.append(work[pos:m.start()])
+        parts.append(token(m.group(0)))
+        pos = m.end()
+    parts.append(work[pos:])
+    return "".join(parts), mapping
+
+
+def restore(text: str, mapping: dict[str, str]) -> str:
+    out = re.sub(
+        r"Z\s*X\s*Q\s*P\s*H\s*(\d+)\s*Q\s*X\s*Z",
+        lambda m: f"ZXQPH{int(m.group(1)):04d}QXZ",
+        text,
+        flags=re.I,
+    )
+    for key, value in mapping.items():
+        out = out.replace(key, value)
+    return out
+
+
+def formalize(source: str, translated: str) -> str:
+    out = translated.strip()
+    replacements = (
+        (r"요구 사항", "요구사항"),
+        (r"하위 시스템", "하위체계"),
+        (r"서브시스템", "하위체계"),
+        (r"방사 민감성|방사 감수성|방사선 감수성|복사 감수성", "방사 내성"),
+        (r"전도성 민감성|전도 감수성|전도성 감수성", "전도 내성"),
+        (r"전도성 방출", "전도 방출"),
+        (r"오디오 주파수", "음성주파수"),
+        (r"전원 리드", "전원선"),
+        (r"라인-접지", "선-접지"),
+        (r"리턴", "귀선"),
+        (r"와이어 접지", "배선 접지"),
+        (r"일시적 전자기장", "과도 전자기장"),
+        (r"일시적인 전자기장", "과도 전자기장"),
+        (r"전기장", "전계"),
+        (r"접지 평면", "접지면"),
+        (r"테스트", "시험"),
+        (r"테스트 사이트", "시험장소"),
+        (r"공차", "허용오차"),
+        (r"차폐 인클로저", "차폐실"),
+        (r"흡수재", "흡수체"),
+        (r"측정 수신기", "측정수신기"),
+        (r"신호 발생기", "신호발생기"),
+        (r"전력 증폭기", "전력증폭기"),
+        (r"공통 모드", "공통모드"),
+        (r"데이터 표시", "자료 제시"),
+        (r"적용 가능성", "적용성"),
+    )
+    for pat, repl in replacements:
+        out = re.sub(pat, repl, out)
+    # Convert Google polite style to neutral Korean-standard style.
+    style = (
+        (r"해야 합니다\.?$", "하여야 한다."),
+        (r"되어야 합니다\.?$", "되어야 한다."),
+        (r"해서는 안 됩니다\.?$", "하여서는 아니 된다."),
+        (r"해서는 안 됩니다", "하여서는 아니 된다"),
+        (r"하지 않아야 합니다\.?$", "하여서는 아니 된다."),
+        (r"합니다\.?$", "한다."),
+        (r"됩니다\.?$", "된다."),
+        (r"입니다\.?$", "이다."),
+        (r"있습니다\.?$", "있다."),
+        (r"없습니다\.?$", "없다."),
+        (r"사용됩니다\.?$", "사용된다."),
+        (r"사용해야 합니다\.?$", "사용하여야 한다."),
+        (r"충족해야 합니다\.?$", "충족하여야 한다."),
+        (r"준수해야 합니다\.?$", "준수하여야 한다."),
+    )
+    for pat, repl in style:
+        out = re.sub(pat, repl, out)
+    if re.search(r"\bshall not\b", source, re.I):
+        out = re.sub(r"(?:하면|해서는|하여서는) 안 (?:된다|됩니다)\.?$", "하여서는 아니 된다.", out)
+        out = re.sub(r"오작동해서는 안 된다", "오작동하여서는 아니 된다", out)
+    elif re.search(r"\bshall\b", source, re.I):
+        out = re.sub(r"해야 한다\.?$", "하여야 한다.", out)
+    out = re.sub(r"\s+([,.;:!?%)\]])", r"\1", out)
+    out = re.sub(r"([([])\s+", r"\1", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return out
+
+
+class GoogleTranslator:
+    def __init__(self, cache_path: Path, workers: int = 8):
+        self.cache_path = cache_path
+        self.workers = workers
+        self.lock = threading.Lock()
+        self.cache: dict[str, str] = {}
+        if cache_path.exists():
+            try:
+                self.cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            except Exception:
+                self.cache = {}
+        self.local = threading.local()
+
+    def session(self) -> requests.Session:
+        if not hasattr(self.local, "session"):
+            s = requests.Session()
+            s.headers.update({"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/151 Safari/537.36"})
+            self.local.session = s
+        return self.local.session
+
+    def translate_one(self, source: str) -> str:
+        exact = exact_lookup(source)
+        if exact is not None:
+            return exact
+        if not should_translate(source):
+            return source
+        protected, mapping = protect(source)
+        last_error = None
+        for attempt in range(8):
+            try:
+                r = self.session().get(
+                    "https://translate.googleapis.com/translate_a/single",
+                    params={"client": "gtx", "sl": "en", "tl": "ko", "dt": "t", "q": protected},
+                    timeout=45,
+                )
+                if r.status_code == 429:
+                    raise RuntimeError("rate limited")
+                r.raise_for_status()
+                data = r.json()
+                out = "".join(part[0] for part in data[0] if part and part[0])
+                return formalize(source, restore(out, mapping))
+            except Exception as exc:
+                last_error = exc
+                time.sleep(min(30, 1.2 * (2 ** attempt)))
+        raise RuntimeError(f"Translation failed: {source[:120]!r}: {last_error}")
+
+    def translate_all(self, texts: Iterable[str]) -> None:
+        pending = []
+        for text in texts:
+            if text in self.cache:
+                continue
+            exact = exact_lookup(text)
+            if exact is not None:
+                self.cache[text] = exact
+            elif not should_translate(text):
+                self.cache[text] = text
+            else:
+                pending.append(text)
+        self.flush()
+        print(f"Google translation cache={len(self.cache)}, pending={len(pending)}", flush=True)
+        if not pending:
+            return
+        completed = 0
+        start = time.time()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.workers) as executor:
+            futures = {executor.submit(self.translate_one, text): text for text in pending}
