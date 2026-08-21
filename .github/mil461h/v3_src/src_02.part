@@ -1,4 +1,3 @@
-    "CS101, conducted susceptibility, power leads.": "CS101, 전도 내성, 전원선.",
     "CS103, conducted susceptibility, antenna port, intermodulation.": "CS103, 전도 내성, 안테나 포트, 상호변조.",
     "CS104, conducted susceptibility, antenna port, rejection of undesired signals.": "CS104, 전도 내성, 안테나 포트, 불요신호 제거.",
     "CS105, conducted susceptibility, antenna port, cross-modulation.": "CS105, 전도 내성, 안테나 포트, 교차변조.",
@@ -14,6 +13,68 @@
     "RS101, radiated susceptibility, magnetic field.": "RS101, 방사 내성, 자기장.",
     "RS103, radiated susceptibility, electric field.": "RS103, 방사 내성, 전계.",
     "RS105, radiated susceptibility, transient electromagnetic field.": "RS105, 방사 내성, 과도 전자기장.",
+})
+
+
+EXACT.update({
+    "Above deck.": "갑판 위.",
+    "Antenna port.": "안테나 포트.",
+    "Below deck.": "갑판 아래.",
+    "Cable bundle.": "케이블 다발.",
+    "Exposed below deck.": "노출된 갑판 아래.",
+    "External installation.": "외부 설치.",
+    "Flight-line equipment.": "비행장 운용장비.",
+    "Input (primary) power leads.": "입력(주) 전원선.",
+    "Internal installation.": "내부 설치.",
+    "Metric units.": "미터법 단위.",
+    "Primary power.": "주전원.",
+    "Safety critical.": "안전필수.",
+    "Test setup boundary.": "시험 구성 경계.",
+    "Acronyms used in this standard.": "이 표준에서 사용하는 약어.",
+    "Acronyms used in this appendix.": "이 부록에서 사용하는 약어.",
+    "Procurement of equipment or subsystems having met other EMI requirements.": "다른 EMI 요구사항을 충족한 장비 또는 하위체계의 조달.",
+    "NOMINAL EUT SOURCE VOLTAGE": "EUT 정격 전원전압",
+    "(AC AND DC)": "(AC/DC)",
+    "APPLICABLE": "적용",
+    "CURVE": "곡선",
+    "ABOVE 28 VOLTS": "28 V 초과",
+    "28 VOLTS OR BELOW": "28 V 이하",
+    "FIGURE CE101- 4. CE101 limit for Navy ASW aircraft and Army aircraft (including flight line) applications.": "그림 CE101-4. 해군 대잠전(ASW) 항공기 및 육군 항공기(비행장 운용 포함)의 CE101 한계값.",
+    "FIGURE CE101-4. CE101 limit for Navy ASW aircraft and Army aircraft (including flight line) applications.": "그림 CE101-4. 해군 대잠전(ASW) 항공기 및 육군 항공기(비행장 운용 포함)의 CE101 한계값.",
+    "TABLE XI. RS103 limits.": "표 XI. RS103 한계값.",
+    "TABLE XI.  RS103 limits.": "표 XI. RS103 한계값.",
+    "LIMIT LEVELS (VOLTS/METER)": "한계 레벨(V/m)",
+    "PLATFORM FREQUENCY RANGE": "플랫폼 / 주파수 범위",
+    "ALL AIRCRAFT (EXTERNAL OR SAFETY CRITICAL) ALL SERVICES": "전 항공기(외부 또는 안전필수) / 전 군",
+    "AIRCRAFT INTERNAL - ARMY": "항공기 내부 - 육군",
+    "AIRCRAFT INTERNAL - NAVY": "항공기 내부 - 해군",
+    "AIRCRAFT INTERNAL - AIR FORCE": "항공기 내부 - 공군",
+    "SHIPS - ABOVE DECK & EXPOSED BELOW DECK **": "선박 - 갑판 위 및 노출된 갑판 아래**",
+    "SHIPS - ABOVE DECK & EXPOSED BELOW DECK": "선박 - 갑판 위 및 노출된 갑판 아래",
+    "SUBMARINES (EXTERNAL)*": "잠수함 외부*",
+    "SUBMARINES (EXTERNAL)": "잠수함 외부",
+    "METALLIC SHIPS - BELOW DECK": "금속 선박 - 갑판 아래",
+    "NON-METALLIC SHIPS - BELOW DECK": "비금속 선박 - 갑판 아래",
+    "NON- METALLIC SHIPS - BELOW DECK": "비금속 선박 - 갑판 아래",
+    "SUBMARINE (INTERNAL)": "잠수함 내부",
+    "GROUND - ARMY": "지상 - 육군",
+    "GROUND - NAVY AND AIR FORCE": "지상 - 해군·공군",
+    "SPACE": "우주",
+    "2 MHz to 30 MHz": "2 MHz ~ 30 MHz",
+    "30 MHz to 1 GHz": "30 MHz ~ 1 GHz",
+    "1 GHz to 18 GHz": "1 GHz ~ 18 GHz",
+    "18 GHz to 40 GHz": "18 GHz ~ 40 GHz",
+    "80 MHz – 250 MHz": "80 MHz ~ 250 MHz",
+    "above 250 MHz": "250 MHz 초과",
+    "For equipment located external to the pressure hull of a submarine but within the superstructure, use METALLIC SHIPS - BELOW DECK": "잠수함 내압선체 외부이면서 상부구조 내부에 설치되는 장비에는 ‘금속 선박 - 갑판 아래’를 적용한다.",
+    "For equipment located in the hangar deck of Aircraft Carriers, use NON-METALLIC SHIPS - BELOW DECK": "항공모함의 격납고 갑판에 설치되는 장비에는 ‘비금속 선박 - 갑판 아래’를 적용한다.",
+})
+
+EXACT.update({
+    "Measurement system test.": "측정시스템 시험.",
+    "Antenna factors.": "안테나 계수.",
+    "* For equipment located external to the pressure hull of a submarine but within the superstructure, use METALLIC SHIPS - BELOW DECK": "* 잠수함 내압선체 외부이면서 상부구조 내부에 설치되는 장비에는 ‘금속 선박 - 갑판 아래’를 적용한다.",
+    "** For equipment located in the hangar deck of Aircraft Carriers, use NON-METALLIC SHIPS - BELOW DECK": "** 항공모함의 격납고 갑판에 설치되는 장비에는 ‘비금속 선박 - 갑판 아래’를 적용한다.",
 })
 
 TERM_MAP = {
@@ -63,98 +124,3 @@ TERM_MAP = {
     "test procedure": "시험 절차",
     "test equipment": "시험 장비",
     "data presentation": "자료 제시",
-    "measurement tolerances": "측정 허용오차",
-    "full width half maximum": "반치전폭",
-    "root mean square": "실효값",
-    "fast Fourier transform": "고속 푸리에 변환",
-    "effective radiated power": "유효 방사전력",
-    "electrostatic discharge": "정전기 방전",
-    "line impedance stabilization network": "선로 임피던스 안정화 회로망",
-    "transient protection device": "과도 보호소자",
-    "common mode": "공통모드",
-    "bulk cable injection": "케이블 다발 주입",
-}
-
-PRESERVE_RE = re.compile(
-    r"(?:https?://\S+|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|"
-    r"MIL-STD-\d+[A-Z]?|SD-\d+|"
-    r"(?:CE|CS|RE|RS)\d{3}(?:-\d+)?|"
-    r"\b(?:AMSC|AREA|ASSIST|DoD|DOD|EMC|EME|EMI|EMICP|EMITP|EMITR|ERP|ESD|EUT|FCC|FFT|FWHM|GFE|IF|ISO|IEC|ANSI|IEEE|LISN|MAD|NDI|RF|RMS|TEM|TPD|CI|CW|DC|AC|NIST|DTRA|DISA|NSA|DID|DIDs|LRU|SRU)\b|"
-    r"\b\d+(?:\.\d+)*(?:\([a-zA-Z0-9.]+\))*\b|"
-    r"\b\d+(?:\.\d+)?\s*(?:Hz|kHz|MHz|GHz|dB|dBm|dBµA|dBpT|V/m|V|A|W|kW|m|cm|mm|ns|µs|μs|ms|µF|μF|ohm|Ω|%)\b)"
-)
-
-SECTION_RE = re.compile(r"^\s*(?:A\.)?\d+(?:\.\d+)*(?:\s*\([^)]*\))?\s+")
-LIST_RE = re.compile(r"^\s*(?:[a-z]\.|\([a-z0-9]+\)|\d+\.|NOTE\s*:|NOTE\s+\d+\s*:)", re.I)
-FORMULA_RE = re.compile(r"^[\s\dA-Za-z_+=×÷/\\|.,:;()\[\]{}<>^%µμΩ°#-]+$")
-TOC_NUM_RE = re.compile(r"^\s*(?:(?:A\.)?\d+(?:\.\d+)*(?:\s*\([^)]*\))?|\d+\.|A\.\d+(?:\.\d+)*)\s*$")
-DOTS_RE = re.compile(r"\.{5,}")
-PAGE_END_RE = re.compile(r"\s+([ivxlcdmIVXLCDM]+|\d+)\s*$")
-
-
-@dataclass
-class Line:
-    text: str
-    bbox: tuple[float, float, float, float]
-    font_size: float
-    bold: bool
-    italic: bool
-    color: tuple[float, float, float]
-    rotation: int
-    block_no: int
-    line_no: int
-
-
-@dataclass
-class Unit:
-    text: str
-    bbox: tuple[float, float, float, float]
-    font_size: float
-    bold: bool
-    italic: bool
-    color: tuple[float, float, float]
-    rotation: int
-    kind: str
-    page_no: int
-
-
-def pick_file(candidates: Sequence[str]) -> str:
-    for p in candidates:
-        if Path(p).exists():
-            return p
-    raise FileNotFoundError(f"No font found: {candidates}")
-
-
-def rgb(value: int) -> tuple[float, float, float]:
-    return (((value >> 16) & 255) / 255.0, ((value >> 8) & 255) / 255.0, (value & 255) / 255.0)
-
-
-def norm(text: str) -> str:
-    text = text.replace("\u00ad", "").replace("\ufeff", " ")
-    text = re.sub(r"[ \t]+", " ", text)
-    return text.strip()
-
-
-def exact_lookup(text: str) -> str | None:
-    t = norm(text)
-    if t in EXACT:
-        return EXACT[t]
-    t2 = t.rstrip()
-    if t2 in EXACT:
-        return EXACT[t2]
-    no_period = t.rstrip(".")
-    if no_period in EXACT:
-        v = EXACT[no_period]
-        return v + ("." if t.endswith(".") and not v.endswith(".") else "")
-    # Generic applicability / limits / procedures headings.
-    m = re.fullmatch(r"((?:CE|CS|RE|RS)\d{3}) applicability\.?", t, re.I)
-    if m:
-        return f"{m.group(1).upper()} 적용성."
-    m = re.fullmatch(r"((?:CE|CS|RE|RS)\d{3}) limits?\.?", t, re.I)
-    if m:
-        return f"{m.group(1).upper()} 한계값."
-    m = re.fullmatch(r"((?:CE|CS|RE|RS)\d{3}) test procedures?\.?", t, re.I)
-    if m:
-        return f"{m.group(1).upper()} 시험 절차."
-    return None
-
