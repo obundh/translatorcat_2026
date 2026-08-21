@@ -1,0 +1,96 @@
+name: Build MIL-STD-461H Korean full translation
+
+on:
+  push:
+    branches:
+      - automation/milstd461h-ko-full-20260821
+    paths:
+      - 'scripts/mil461h_full_ko.py'
+      - '.github/workflows/mil461h_full_ko.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      HF_HUB_DISABLE_XET: '1'
+      HF_HUB_ENABLE_HF_TRANSFER: '0'
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install fonts and PDF utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk poppler-utils
+
+      - name: Cache Hugging Face model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-opus-en-ko-v1
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install 'transformers==4.53.3' sentencepiece sacremoses 'pymupdf==1.26.7' pillow numpy safetensors huggingface_hub
+
+      - name: Download MIL-STD-461H source PDF
+        run: |
+          mkdir -p work output
+          curl --retry 5 --retry-delay 5 -fL \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o work/MIL_STD_461H_2026_EN.pdf
+          python - <<'PY'
+          import fitz
+          p='work/MIL_STD_461H_2026_EN.pdf'
+          d=fitz.open(p)
+          assert d.page_count == 294, d.page_count
+          print('Source verified:', d.page_count, 'pages')
+          PY
+
+      - name: Translate, rebuild, and compare all 294 pages
+        run: |
+          python scripts/mil461h_full_ko.py \
+            --source work/MIL_STD_461H_2026_EN.pdf \
+            --outdir output
+
+      - name: Package deliverables
+        run: |
+          cp work/MIL_STD_461H_2026_EN.pdf output/MIL_STD_461H_2026_EN_ORIGINAL.pdf
+          cd output
+          zip -9 MIL_STD_461H_2026_KO_FULL_PACKAGE.zip \
+            MIL_STD_461H_2026_KO_FULL.pdf \
+            MIL_STD_461H_2026_EN_ORIGINAL.pdf \
+            MIL_STD_461H_2026_KO_QA.json \
+            MIL_STD_461H_2026_KO_REGRESSION.json \
+            MIL_STD_461H_2026_KO_COMPARISON.png \
+            README_KO.txt SHA256SUMS.txt
+          ls -lh
+
+      - name: Upload verified translation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIL_STD_461H_2026_KO_FULL
+          path: |
+            output/MIL_STD_461H_2026_KO_FULL.pdf
+            output/MIL_STD_461H_2026_KO_FULL_PACKAGE.zip
+            output/MIL_STD_461H_2026_KO_QA.json
+            output/MIL_STD_461H_2026_KO_REGRESSION.json
+            output/MIL_STD_461H_2026_KO_COMPARISON.png
+            output/README_KO.txt
+            output/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
