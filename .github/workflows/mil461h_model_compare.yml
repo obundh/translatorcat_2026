@@ -1,0 +1,85 @@
+name: Compare EN-KO translation models for MIL-STD-461H
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/mil461h_model_compare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      HF_HUB_DISABLE_XET: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install 'transformers==4.53.3' sentencepiece sacremoses safetensors
+      - name: Compare sample translations
+        run: |
+          python - <<'PY'
+          import json, torch
+          from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+          torch.set_num_threads(4)
+          samples = [
+            'GENERAL REQUIREMENTS',
+            'Joint procurement.',
+            'Filtering (Navy only).',
+            'Electronic, electrical, and electromechanical equipment and subsystems shall comply with the applicable general interface requirements in 4.2.',
+            'The use of line-to-ground filters for EMI control shall be minimized.',
+            'Such filters establish low impedance paths for structure (common mode) currents through the ground plane and can be a major cause of interference in systems, platforms, or installations.',
+            'The operational performance of an equipment or subsystem shall not be degraded, nor shall it malfunction, when all of the units or devices in the equipment or subsystem are operating together at their designed levels of efficiency or their design capability.',
+            'ALL AIRCRAFT (EXTERNAL OR SAFETY CRITICAL) ALL SERVICES',
+            'SHIPS - ABOVE DECK & EXPOSED BELOW DECK',
+            'For equipment located external to the pressure hull of a submarine but within the superstructure, use METALLIC SHIPS - BELOW DECK.',
+            'RS105, radiated susceptibility, transient electromagnetic field.',
+            'The EUT shall not exhibit any malfunction, degradation of performance, or deviation from specified indications beyond the tolerances indicated in the individual equipment or subsystem specification.',
+          ]
+          models = [
+            ('NHNDQ/nllb-finetuned-en2ko', 'nllb'),
+            ('seongs/ke-t5-base-aihub-koen-translation-integrated-10m-en-to-ko', 't5'),
+          ]
+          output = {'samples': samples, 'models': {}}
+          for name, kind in models:
+            print('LOADING', name, flush=True)
+            tok = AutoTokenizer.from_pretrained(name)
+            model = AutoModelForSeq2SeqLM.from_pretrained(name)
+            model.eval()
+            rows=[]
+            for text in samples:
+              kwargs={}
+              if kind=='nllb':
+                try: tok.src_lang='eng_Latn'
+                except Exception: pass
+              inp=tok(text, return_tensors='pt', truncation=True, max_length=512)
+              gen_kwargs={'max_new_tokens':256, 'num_beams':4, 'do_sample':False, 'length_penalty':1.0}
+              if kind=='nllb':
+                tid=tok.convert_tokens_to_ids('kor_Hang')
+                if tid is not None and tid >= 0: gen_kwargs['forced_bos_token_id']=tid
+              with torch.inference_mode():
+                out=model.generate(**inp, **gen_kwargs)
+              trans=tok.decode(out[0], skip_special_tokens=True)
+              rows.append(trans)
+              print(name, '\nEN:', text, '\nKO:', trans, '\n', flush=True)
+            output['models'][name]=rows
+            del model, tok
+          open('model_comparison.json','w',encoding='utf-8').write(json.dumps(output,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MIL461H_MODEL_COMPARISON
+          path: model_comparison.json
+          retention-days: 2
