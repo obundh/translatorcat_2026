@@ -1,3 +1,99 @@
+        (r"수 없습니다\.", "수 없다."),
+        (r"수 있습니다\.", "수 있다."),
+        (r"하지 않습니다\.", "하지 않는다."),
+        (r"않습니다\.", "않는다."),
+        (r"합니다\.", "한다."),
+        (r"됩니다\.", "된다."),
+        (r"입니다\.", "이다."),
+        (r"있습니다\.", "있다."),
+        (r"없습니다\.", "없다."),
+        (r"집니다\.", "진다."),
+        (r"납니다\.", "난다."),
+        (r"따릅니다\.", "따른다."),
+        (r"갖습니다\.", "갖는다."),
+        (r"해야 하며", "하여야 하며"),
+        (r"해야 하고", "하여야 하고"),
+    )
+    for pat, repl in style:
+        out = re.sub(pat, repl, out)
+    if re.search(r"\bshall not\b", source, re.I):
+        out = re.sub(r"(?:하면|해서는|하여서는) 안 (?:된다|됩니다)\.?", "하여서는 아니 된다.", out)
+        out = re.sub(r"오작동해서는 안 된다", "오작동하여서는 아니 된다", out)
+    elif re.search(r"\bshall\b", source, re.I):
+        out = re.sub(r"해야 한다\.?$", "하여야 한다.", out)
+    out = re.sub(r"\s+([,.;:!?%)\]])", r"\1", out)
+    out = re.sub(r"([([])\s+", r"\1", out)
+    out = re.sub(r"\s{2,}", " ", out).strip()
+    return out
+
+
+
+class GoogleTranslator:
+    def __init__(self, cache_path: Path, workers: int = 8):
+        self.cache_path = cache_path
+        self.workers = workers
+        self.lock = threading.Lock()
+        self.cache: dict[str, str] = {}
+        if cache_path.exists():
+            try:
+                self.cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            except Exception:
+                self.cache = {}
+        self.local = threading.local()
+
+    def session(self) -> requests.Session:
+        if not hasattr(self.local, "session"):
+            s = requests.Session()
+            s.headers.update({"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/151 Safari/537.36"})
+            self.local.session = s
+        return self.local.session
+
+    def translate_one(self, source: str) -> str:
+        exact = exact_lookup(source)
+        if exact is not None:
+            return exact
+        if not should_translate(source):
+            return source
+        protected, mapping = protect(source)
+        last_error = None
+        for attempt in range(8):
+            try:
+                r = self.session().get(
+                    "https://translate.googleapis.com/translate_a/single",
+                    params={"client": "gtx", "sl": "en", "tl": "ko", "dt": "t", "q": protected},
+                    timeout=45,
+                )
+                if r.status_code == 429:
+                    raise RuntimeError("rate limited")
+                r.raise_for_status()
+                data = r.json()
+                out = "".join(part[0] for part in data[0] if part and part[0])
+                return formalize(source, restore(out, mapping))
+            except Exception as exc:
+                last_error = exc
+                time.sleep(min(30, 1.2 * (2 ** attempt)))
+        raise RuntimeError(f"Translation failed: {source[:120]!r}: {last_error}")
+
+    def translate_all(self, texts: Iterable[str]) -> None:
+        pending = []
+        for text in texts:
+            if text in self.cache:
+                continue
+            exact = exact_lookup(text)
+            if exact is not None:
+                self.cache[text] = exact
+            elif not should_translate(text):
+                self.cache[text] = text
+            else:
+                pending.append(text)
+        self.flush()
+        print(f"Google translation cache={len(self.cache)}, pending={len(pending)}", flush=True)
+        if not pending:
+            return
+        completed = 0
+        start = time.time()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.workers) as executor:
+            futures = {executor.submit(self.translate_one, text): text for text in pending}
             for fut in concurrent.futures.as_completed(futures):
                 source = futures[fut]
                 try:
@@ -71,92 +167,3 @@ def is_header_footer(line: Line, page: fitz.Page) -> bool:
     t = norm(line.text)
     if not t:
         return True
-    if line.bbox[1] < 58 and (t == "MIL-STD-461H" or re.fullmatch(r"MIL-STD-461H\s*", t)):
-        return True
-    if line.bbox[1] > page.rect.height - 55:
-        if re.fullmatch(r"[ivxlcdmIVXLCDM]+|\d+", t):
-            return True
-        # Footer is translated separately.
-        if t.startswith("Downloaded from"):
-            return False
-    return False
-
-
-def overlaps(rect: Sequence[float], other: Sequence[float], ratio: float = 0.35) -> bool:
-    a, b = fitz.Rect(rect), fitz.Rect(other)
-    inter = a & b
-    if inter.is_empty:
-        return False
-    return (inter.width * inter.height) / max(1.0, a.width * a.height) >= ratio
-
-
-def find_real_tables(page: fitz.Page) -> list:
-    try:
-        tables = list(page.find_tables().tables)
-    except Exception:
-        return []
-    kept = []
-    for table in tables:
-        rows = len(table.rows)
-        cols = max((len(row.cells) for row in table.rows), default=0)
-        cells = rows * cols
-        if rows < 2 or cols < 2 or cells < 4:
-            continue
-        extracted = table.extract()
-        values = [norm(str(cell or "")) for row in extracted for cell in row]
-        nonempty = [v for v in values if v]
-        density = len(nonempty) / max(1, cells)
-        avg_chars = sum(len(v) for v in nonempty) / max(1, len(nonempty))
-        area = fitz.Rect(table.bbox).width * fitz.Rect(table.bbox).height
-        if area < 800:
-            continue
-        # Graph grids and diagrams are sparse pseudo-tables.
-        if density < 0.22:
-            continue
-        if cells >= 60 and avg_chars < 6.0:
-            continue
-        # Very large page-spanning grids are almost always figures.
-        if cells >= 100 and area > page.rect.width * page.rect.height * 0.35:
-            continue
-        kept.append(table)
-    return kept
-
-
-def logical_units(page: fitz.Page, page_no: int, table_bboxes: list[Sequence[float]]) -> list[Unit]:
-    lines = extract_lines(page)
-    by_block: dict[int, list[Line]] = {}
-    for line in lines:
-        if is_header_footer(line, page):
-            continue
-        if any(overlaps(line.bbox, tb, 0.30) for tb in table_bboxes):
-            continue
-        by_block.setdefault(line.block_no, []).append(line)
-    units: list[Unit] = []
-    for block_lines in by_block.values():
-        block_lines.sort(key=lambda x: (x.bbox[1], x.bbox[0]))
-        block_width = max(x.bbox[2] for x in block_lines) - min(x.bbox[0] for x in block_lines)
-        if block_width < 180 or any(x.rotation != 0 for x in block_lines):
-            for line in block_lines:
-                t = norm(line.text)
-                if not t:
-                    continue
-                kind = "heading" if line.bold or SECTION_RE.match(t) else "label"
-                units.append(Unit(t, line.bbox, line.font_size, line.bold, line.italic, line.color, line.rotation, kind, page_no))
-            continue
-        current: list[Line] = []
-        current_kind = "paragraph"
-
-        def flush() -> None:
-            nonlocal current, current_kind
-            if not current:
-                return
-            text = " ".join(norm(x.text) for x in current if norm(x.text)).strip()
-            if text:
-                bbox = (
-                    min(x.bbox[0] for x in current), min(x.bbox[1] for x in current),
-                    max(x.bbox[2] for x in current), max(x.bbox[3] for x in current),
-                )
-                units.append(Unit(
-                    text=text,
-                    bbox=bbox,
-                    font_size=statistics.median(x.font_size for x in current),
