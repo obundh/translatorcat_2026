@@ -7,23 +7,15 @@ import time
 import types
 from pathlib import Path
 
-# The shared layout engine also contains a Marian fallback class.  Stub those
-# optional imports here so the faster Argos workflow does not need PyTorch.
-torch_stub = types.ModuleType("torch")
-torch_stub.set_num_threads = lambda _n: None
-def _inference_mode():
-    def decorator(fn):
-        return fn
-    return decorator
-torch_stub.inference_mode = _inference_mode
-sys.modules.setdefault("torch", torch_stub)
+# Argos imports Stanza, which uses the real PyTorch dependency installed with
+# Argos.  Import it before stubbing the Transformers-only Marian fallback.
+import argostranslate.package
+import argostranslate.translate
+
 transformers_stub = types.ModuleType("transformers")
 transformers_stub.AutoModelForSeq2SeqLM = object
 transformers_stub.AutoTokenizer = object
 sys.modules.setdefault("transformers", transformers_stub)
-
-import argostranslate.package
-import argostranslate.translate
 
 import mil461h_full_ko as base
 
