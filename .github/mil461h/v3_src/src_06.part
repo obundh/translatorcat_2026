@@ -1,0 +1,139 @@
+    bold = sum(1 for x in bolds if x) >= max(1, len(bolds) // 2) if bolds else False
+    align = 1 if centers and abs(statistics.median(centers) - (cell.x0 + cell.x1) / 2) < cell.width * 0.12 else 0
+    return size, bold, align
+
+
+def place_table_cell(page: fitz.Page, source_page: fitz.Page, cell_bbox: Sequence[float], text: str, regular_font: str, bold_font: str, header: bool) -> dict:
+    cell = fitz.Rect(cell_bbox)
+    src_size, src_bold, align = source_cell_style(source_page, cell)
+    bold = header or src_bold
+    fontfile = bold_font if bold else regular_font
+    rect = fitz.Rect(cell.x0 + 4.0, cell.y0 + 1.5, cell.x1 - 4.0, cell.y1 - 1.5)
+    start, minimum = cell_font_size(src_size, cell, text)
+    size = start
+    spare = -1.0
+    while size >= minimum - 0.01:
+        shape = page.new_shape()
+        spare = shape.insert_textbox(rect, text, fontfile=fontfile, fontname="tfit", fontsize=size, lineheight=1.08, color=(0,0,0), align=align)
+        if spare >= -0.05:
+            break
+        size -= 0.15
+    overflow = spare < -0.05
+    if overflow:
+        size = minimum
+    page.insert_textbox(rect, text, fontfile=fontfile, fontname="tbold" if bold else "treg", fontsize=size, lineheight=1.06, color=(0,0,0), align=align, overlay=True)
+    return {"bbox": list(cell), "text": text, "font_used": size, "overflow": overflow}
+
+
+def parse_toc_rows(page: fitz.Page) -> list[dict]:
+    lines = [l for l in extract_lines(page) if 65 < l.bbox[1] < page.rect.height - 65 and norm(l.text)]
+    lines.sort(key=lambda l: (round(l.bbox[1], 1), l.bbox[0]))
+    # Group by block and retain original line order, which is highly regular in this document.
+    by_block: dict[int, list[Line]] = {}
+    for l in lines:
+        by_block.setdefault(l.block_no, []).append(l)
+    rows = []
+    for block_lines in by_block.values():
+        block_lines.sort(key=lambda l: (l.bbox[1], l.bbox[0]))
+        i = 0
+        while i < len(block_lines):
+            line = block_lines[i]
+            t = norm(line.text)
+            # Standalone headings.
+            if t in {"CONTENTS", "PARAGRAPH", "PAGE", "FIGURES", "TABLES"}:
+                rows.append({"kind": "heading", "text": t, "bbox": line.bbox, "font_size": line.font_size, "bold": line.bold})
+                i += 1
+                continue
+            number_line = None
+            if TOC_NUM_RE.fullmatch(t):
+                number_line = line
+                i += 1
+                if i >= len(block_lines):
+                    continue
+                line = block_lines[i]
+                t = norm(line.text)
+            # Build one entry, including wrapped title lines, until a dotted leader line is reached.
+            title_lines = []
+            while i < len(block_lines):
+                candidate = block_lines[i]
+                ct = norm(candidate.text)
+                if TOC_NUM_RE.fullmatch(ct) and title_lines:
+                    break
+                title_lines.append(candidate)
+                i += 1
+                if DOTS_RE.search(ct) and PAGE_END_RE.search(ct):
+                    break
+            if not title_lines:
+                continue
+            full = " ".join(norm(x.text) for x in title_lines)
+            mpage = PAGE_END_RE.search(full)
+            mdots = DOTS_RE.search(full)
+            if not (mpage and mdots):
+                # Non-entry explanatory text is kept as an ordinary label.
+                bbox = (
+                    min(x.bbox[0] for x in title_lines), min(x.bbox[1] for x in title_lines),
+                    max(x.bbox[2] for x in title_lines), max(x.bbox[3] for x in title_lines),
+                )
+                rows.append({"kind": "label", "text": full, "bbox": bbox, "font_size": statistics.median(x.font_size for x in title_lines), "bold": any(x.bold for x in title_lines)})
+                continue
+            title = full[:mdots.start()].strip()
+            page_label = mpage.group(1)
+            bbox = (
+                min(x.bbox[0] for x in title_lines), min(x.bbox[1] for x in title_lines),
+                max(x.bbox[2] for x in title_lines), max(x.bbox[3] for x in title_lines),
+            )
+            rows.append({
+                "kind": "entry", "number": norm(number_line.text) if number_line else "",
+                "number_bbox": number_line.bbox if number_line else None,
+                "title": title, "page_label": page_label, "bbox": bbox,
+                "font_size": statistics.median(x.font_size for x in title_lines),
+                "bold": any(x.bold for x in title_lines),
+            })
+    rows.sort(key=lambda r: (r["bbox"][1], r["bbox"][0]))
+    return rows
+
+
+def draw_toc_entry(page: fitz.Page, row: dict, translated: str, regular_font: str, bold_font: str) -> dict:
+    color = (0.0, 0.0, 0.85)
+    fontfile = bold_font if row.get("bold") else regular_font
+    bbox = fitz.Rect(row["bbox"])
+    font = fitz.Font(fontfile=fontfile)
+    size = min(8.2, max(6.8, row.get("font_size", 8.0) * 0.88))
+    if row.get("number") and row.get("number_bbox"):
+        nb = fitz.Rect(row["number_bbox"])
+        page.insert_text((nb.x0, nb.y1 - 2.2), row["number"], fontfile=fontfile, fontname="tocnum", fontsize=size, color=color, overlay=True)
+    x0 = bbox.x0
+    right = min(page.rect.width - 42, 543)
+    page_label = str(row["page_label"])
+    page_width = font.text_length(page_label, fontsize=size)
+    available = right - x0 - page_width - 10
+    # Fit to one or two lines within the original row height.
+    lineheight = size * 1.13
+    words = translated.split()
+    lines = []
+    current = ""
+    for word in words:
+        cand = f"{current} {word}".strip() if current else word
+        if font.text_length(cand, fontsize=size) <= available:
+            current = cand
+        else:
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    while (len(lines) > 2 or len(lines) * lineheight > bbox.height + 2) and size > 6.0:
+        size -= 0.2
+        page_width = font.text_length(page_label, fontsize=size)
+        available = right - x0 - page_width - 10
+        lineheight = size * 1.10
+        lines = []
+        current = ""
+        for word in words:
+            cand = f"{current} {word}".strip() if current else word
+            if font.text_length(cand, fontsize=size) <= available:
+                current = cand
+            else:
+                if current:
+                    lines.append(current)
+                current = word
