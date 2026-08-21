@@ -1,0 +1,181 @@
+
+# Final full-document review patch: translate fragmented figure labels, reject
+# graph grids misdetected as tables, re-apply current terminology to cached
+# translations, and use deterministic manual wrapping for dense table cells.
+EXACT.update({
+    "ELEVATION ANGLE (DEGREES)": "고각(도)",
+    "ELEVATION ANGLE": "고각",
+    "FIELD STRENGTH (V/M)": "전계강도(V/m)",
+    "FIELD STRENGTH": "전계강도",
+    "FREQUENCY (GHz)": "주파수(GHz)",
+    "FREQUENCY (MHz)": "주파수(MHz)",
+    "FREQUENCY (kHz)": "주파수(kHz)",
+    "FREQUENCY (Hz)": "주파수(Hz)",
+    "PIM Levels (dBm)": "PIM 레벨(dBm)",
+    "High Altitude Electromagnetic Pulse": "고고도 전자기 펄스",
+    "HIGH ALTITUDE ELECTROMAGNETIC PULSE": "고고도 전자기 펄스",
+    "FIXED FREQUENCY": "고정 주파수",
+    "CALIBRATION SIGNAL LEVEL": "교정 신호 레벨",
+    "PHASE COHERENT INFORMATION": "위상 일관 정보",
+    "MODE TUNED TEST": "모드 동조 시험",
+    "MODE STIRRED TEST": "모드 교반 시험",
+    "NORMALIZED GAIN (dB)": "정규화 이득(dB)",
+    "NORMALIZED GAIN": "정규화 이득",
+    "RECEIVED POWER": "수신전력",
+    "SOURCE POWER": "소스 전력",
+    "Field generator": "전계 발생기",
+    "FIELD GENERATOR": "전계 발생기",
+    "FIXED": "고정",
+    "FREQUENCY": "주파수",
+    "FIELD": "전계",
+    "GENERATOR": "발생기",
+    "ELEVATION": "고각",
+    "ANGLE": "각도",
+    "DEGREES": "도",
+    "PHASE": "위상",
+    "COHERENT": "일관",
+    "INFORMATION": "정보",
+    "MODE": "모드",
+    "TUNED": "동조",
+    "STIRRED": "교반",
+    "TEST": "시험",
+    "POWER": "전력",
+    "GAIN": "이득",
+})
+TERM_MAP.update({
+    "tailoring considerations": "조정 시 고려사항",
+    "high altitude electromagnetic pulse": "고고도 전자기 펄스",
+    "phase coherent information": "위상 일관 정보",
+    "fixed frequency": "고정 주파수",
+    "field generator": "전계 발생기",
+})
+
+_original_exact_lookup_final = exact_lookup
+
+def exact_lookup(text: str) -> str | None:
+    value = _original_exact_lookup_final(text)
+    if value is not None:
+        return value
+    t = norm(text)
+    m = re.fullmatch(r"((?:CE|CS|RE|RS)\d{3})\s+tailoring considerations\.?", t, re.I)
+    if m:
+        return f"{m.group(1).upper()} 조정 시 고려사항."
+    m = re.fullmatch(r"tailoring considerations\.?", t, re.I)
+    if m:
+        return "조정 시 고려사항."
+    return None
+
+
+def _reviewed_cache_get(self, text: str) -> str:
+    exact = exact_lookup(text)
+    if exact is not None:
+        return exact
+    value = self.cache.get(text, text)
+    return formalize(text, value) if should_translate(text) else value
+
+GoogleTranslator.get = _reviewed_cache_get
+
+_original_find_real_tables_final = find_real_tables
+
+def find_real_tables(page: fitz.Page) -> list:
+    candidates = _original_find_real_tables_final(page)
+    upper = page.get_text("text").upper()
+    graph_markers = (
+        "ELEVATION ANGLE", "PIM LEVELS", "PHASE COHERENT INFORMATION",
+        "MODE TUNED TEST", "MODE STIRRED TEST", "FIXED FREQUENCY",
+        "FIELD GENERATOR", "NORMALIZED GAIN", "RECEIVED POWER",
+    )
+    marker_present = any(marker in upper for marker in graph_markers)
+    kept = []
+    for table in candidates:
+        rows = len(table.rows)
+        cols = max((len(row.cells) for row in table.rows), default=0)
+        cell_count = rows * cols
+        extracted = table.extract()
+        values = [norm(str(cell or "")) for row in extracted for cell in row]
+        nonempty = [v for v in values if v]
+        density = len(nonempty) / max(1, cell_count)
+        average_chars = sum(len(v) for v in nonempty) / max(1, len(nonempty))
+        area = fitz.Rect(table.bbox).width * fitz.Rect(table.bbox).height
+        if cell_count >= 24 and density < 0.55 and average_chars < 18.0:
+            continue
+        if marker_present and cell_count >= 8 and area > 15000:
+            continue
+        kept.append(table)
+    return kept
+
+
+def _wrap_cell_text(text: str, font: fitz.Font, size: float, width: float) -> list[str]:
+    lines: list[str] = []
+    for paragraph in text.split("\n"):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            lines.append("")
+            continue
+        words = paragraph.split()
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip() if current else word
+            if font.text_length(candidate, fontsize=size) <= width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+            if font.text_length(word, fontsize=size) <= width:
+                current = word
+                continue
+            piece = ""
+            for ch in word:
+                candidate = piece + ch
+                if font.text_length(candidate, fontsize=size) <= width:
+                    piece = candidate
+                else:
+                    if piece:
+                        lines.append(piece)
+                    piece = ch
+            current = piece
+        if current:
+            lines.append(current)
+    return lines or [""]
+
+
+def place_table_cell(page: fitz.Page, source_page: fitz.Page, cell_bbox: Sequence[float], text: str, regular_font: str, bold_font: str, header: bool) -> dict:
+    cell = fitz.Rect(cell_bbox)
+    src_size, src_bold, align = source_cell_style(source_page, cell)
+    bold = header or src_bold
+    fontfile = bold_font if bold else regular_font
+    font = fitz.Font(fontfile=fontfile)
+    rect = fitz.Rect(cell.x0 + 3.0, cell.y0 + 1.0, cell.x1 - 3.0, cell.y1 - 1.0)
+    start = min(8.2 if not header else 7.7, max(5.0, src_size * 0.82))
+    minimum = 3.0
+    size = start
+    chosen_lines = [text]
+    chosen_lineheight = 1.08
+    fit = False
+    while size >= minimum - 0.01:
+        lineheight = 1.08 if size >= 4.7 else 0.96
+        lines = _wrap_cell_text(text, font, size, max(2.0, rect.width))
+        total_height = len(lines) * size * lineheight
+        if total_height <= rect.height + 0.2 and all(font.text_length(line, fontsize=size) <= rect.width + 0.2 for line in lines):
+            chosen_lines = lines
+            chosen_lineheight = lineheight
+            fit = True
+            break
+        size -= 0.12
+    size = max(minimum, size)
+    if not fit:
+        chosen_lines = _wrap_cell_text(text, font, size, max(2.0, rect.width))
+        chosen_lineheight = 0.92
+    total_height = len(chosen_lines) * size * chosen_lineheight
+    baseline = rect.y0 + max(0.0, (rect.height - total_height) / 2.0) + size * 0.88
+    for line in chosen_lines:
+        width = font.text_length(line, fontsize=size)
+        if align == 1:
+            x = rect.x0 + max(0.0, (rect.width - width) / 2.0)
+        else:
+            x = rect.x0
+        page.insert_text((x, baseline), line, fontfile=fontfile, fontname="manualcellb" if bold else "manualcell", fontsize=size, color=(0,0,0), overlay=True)
+        baseline += size * chosen_lineheight
+    overflow = bool(total_height > rect.height + 0.5 or any(font.text_length(line, fontsize=size) > rect.width + 0.5 for line in chosen_lines))
+    return {"bbox": list(cell), "text": text, "font_used": size, "overflow": overflow}
+
