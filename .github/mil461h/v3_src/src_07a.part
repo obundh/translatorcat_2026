@@ -1,0 +1,88 @@
+
+# Fine layout overrides for rotated graph labels, one-line figure labels, and
+# dense table footnotes found during high-resolution representative-page review.
+_original_place_text_fit_v3 = place_text_fit
+
+
+def place_text_fit(page: fitz.Page, unit: Unit, text: str, regular_font: str, bold_font: str, next_y: float | None = None) -> dict:
+    rect = fitz.Rect(unit.bbox)
+    fontfile = bold_font if unit.bold or unit.kind == "heading" else regular_font
+    color = unit.color
+    if color[2] > 0.5 and color[0] < 0.4:
+        color = (0.0, 0.0, 0.0)
+
+    # Figure and graph labels are often a single baseline in a shallow box.
+    if unit.rotation == 0 and unit.kind == "label" and rect.height < max(10.0, unit.font_size * 1.45):
+        font = fitz.Font(fontfile=fontfile)
+        size = min(7.2, max(5.0, unit.font_size * 0.82))
+        max_width = max(4.0, min(page.rect.width - 40, rect.x1 + 8.0) - rect.x0)
+        while font.text_length(text, fontsize=size) > max_width and size > 4.2:
+            size -= 0.15
+        baseline = rect.y0 + min(rect.height - 0.3, size * 0.92)
+        page.insert_text((rect.x0, baseline), text, fontfile=fontfile, fontname="labeldirect", fontsize=size, color=color, overlay=True)
+        return {"page": unit.page_no, "kind": unit.kind, "source": unit.text[:250], "translation": text[:250], "bbox": list(rect), "font_original": unit.font_size, "font_used": size, "overflow": font.text_length(text, fontsize=size) > max_width + 0.2}
+
+    # Rotated axis titles need a little more cross-axis room than the source font.
+    if unit.rotation in (90, 270):
+        rect.x0 = max(2.0, rect.x0 - 3.0)
+        rect.x1 = min(page.rect.width - 2.0, rect.x1 + 4.0)
+        rect.y0 = max(2.0, rect.y0 - 4.0)
+        rect.y1 = min(page.rect.height - 2.0, rect.y1 + 6.0)
+        start = min(7.0, max(5.4, unit.font_size * 0.80))
+        minimum = 4.1
+        size = start
+        spare = -1.0
+        while size >= minimum - 0.01:
+            shape = page.new_shape()
+            spare = shape.insert_textbox(rect, text, fontfile=fontfile, fontname="rotfit", fontsize=size, lineheight=1.0, color=color, align=0, rotate=unit.rotation)
+            if spare >= -0.05:
+                break
+            size -= 0.15
+        overflow = spare < -0.05
+        page.insert_textbox(rect, text, fontfile=fontfile, fontname="rotlabel", fontsize=max(minimum, size), lineheight=1.0, color=color, align=0, rotate=unit.rotation, overlay=True)
+        return {"page": unit.page_no, "kind": unit.kind, "source": unit.text[:250], "translation": text[:250], "bbox": list(rect), "font_original": unit.font_size, "font_used": max(minimum, size), "overflow": overflow}
+
+    return _original_place_text_fit_v3(page, unit, text, regular_font, bold_font, next_y=next_y)
+
+
+def place_table_cell(page: fitz.Page, source_page: fitz.Page, cell_bbox: Sequence[float], text: str, regular_font: str, bold_font: str, header: bool) -> dict:
+    cell = fitz.Rect(cell_bbox)
+    src_size, src_bold, align = source_cell_style(source_page, cell)
+    bold = header or src_bold
+    fontfile = bold_font if bold else regular_font
+    rect = fitz.Rect(cell.x0 + 3.0, cell.y0 + 1.0, cell.x1 - 3.0, cell.y1 - 1.0)
+
+    # A single short row is rendered directly on its baseline.
+    if "\n" not in text and cell.height < 14:
+        font = fitz.Font(fontfile=fontfile)
+        size = min(6.0, max(4.5, src_size * 0.78))
+        while font.text_length(text, fontsize=size) > rect.width and size > 3.8:
+            size -= 0.12
+        tw = font.text_length(text, fontsize=size)
+        x = rect.x0 + max(0.0, (rect.width - tw) / 2 if align == 1 else 0.0)
+        y = cell.y0 + (cell.height + size) / 2 - 0.8
+        page.insert_text((x, y), text, fontfile=fontfile, fontname="tshort2", fontsize=size, color=(0,0,0), overlay=True)
+        return {"bbox": list(cell), "text": text, "font_used": size, "overflow": tw > rect.width + 0.25}
+
+    if cell.width < 45:
+        start, minimum = min(6.1, max(4.8, src_size * 0.78)), 3.7
+    elif cell.width < 90:
+        start, minimum = min(7.0, max(5.5, src_size * 0.80)), 4.0
+    else:
+        start, minimum = min(8.2, max(6.2, src_size * 0.82)), 4.0
+    size = start
+    spare = -1.0
+    lineheight = 1.05
+    while size >= minimum - 0.01:
+        shape = page.new_shape()
+        spare = shape.insert_textbox(rect, text, fontfile=fontfile, fontname="tfit2", fontsize=size, lineheight=lineheight, color=(0,0,0), align=align)
+        if spare >= -0.05:
+            break
+        size -= 0.12
+        if size < 4.8:
+            lineheight = 0.98
+    overflow = spare < -0.05
+    size = max(minimum, size)
+    page.insert_textbox(rect, text, fontfile=fontfile, fontname="tbold2" if bold else "treg2", fontsize=size, lineheight=lineheight, color=(0,0,0), align=align, overlay=True)
+    return {"bbox": list(cell), "text": text, "font_used": size, "overflow": overflow}
+
