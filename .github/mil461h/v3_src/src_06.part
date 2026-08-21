@@ -1,3 +1,111 @@
+        nxt = annot.next
+        try:
+            page.delete_annot(annot)
+        except Exception:
+            pass
+        annot = nxt
+    for line in lines:
+        t = norm(line.text)
+        if not t:
+            continue
+        footer = t.startswith("Downloaded from")
+        forced = any(overlaps(line.bbox, tb, 0.20) for tb in force_redact_bboxes)
+        if keep_header_page and is_header_footer(line, page) and not footer:
+            continue
+        if not (footer or forced or should_translate(t) or exact_lookup(t) is not None):
+            # Keep numerical ticks, formulas, units and test codes in their exact source positions.
+            continue
+        page.add_redact_annot(fitz.Rect(line.bbox), fill=None, cross_out=False)
+    page.apply_redactions(
+        images=fitz.PDF_REDACT_IMAGE_NONE,
+        graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+        text=fitz.PDF_REDACT_TEXT_REMOVE,
+    )
+    for rect in artifact_rects:
+        cover = fitz.Rect(rect.x0 - 1.0, rect.y0 - 1.0, rect.x1 + 1.0, rect.y1 + 1.0)
+        page.draw_rect(cover, color=None, fill=(1, 1, 1), overlay=True)
+
+
+def font_size_for(unit: Unit) -> tuple[float, float, float]:
+    if unit.kind == "heading":
+        return min(10.2, max(8.6, unit.font_size * 0.92)), 7.8, 1.08
+    if unit.kind == "list":
+        return min(9.2, max(8.1, unit.font_size * 0.84)), 7.1, 1.12
+    if unit.kind == "label":
+        return min(8.6, max(6.6, unit.font_size * 0.82)), 5.2, 1.05
+    return min(9.3, max(8.2, unit.font_size * 0.84)), 7.2, 1.12
+
+
+def place_text_fit(page: fitz.Page, unit: Unit, text: str, regular_font: str, bold_font: str, next_y: float | None = None) -> dict:
+    rect = fitz.Rect(unit.bbox)
+    if unit.rotation == 0:
+        rect.x1 = min(page.rect.width - 42, max(rect.x1 + 2.0, 540 if rect.x0 < 100 else rect.x1 + 2.0))
+        if next_y is not None and next_y > rect.y1:
+            rect.y1 = max(rect.y1 + 0.8, min(next_y - 1.5, rect.y1 + max(4.0, unit.font_size * 0.9)))
+        else:
+            rect.y1 += max(1.0, unit.font_size * 0.18)
+    else:
+        rect.x0 -= 0.5; rect.x1 += 0.5; rect.y0 -= 0.5; rect.y1 += 0.5
+    fontfile = bold_font if unit.bold or unit.kind == "heading" else regular_font
+    start, minimum, lineheight = font_size_for(unit)
+    color = unit.color
+    # Hyperlink blue is not retained; body is rendered in clean black.
+    if color[2] > 0.5 and color[0] < 0.4:
+        color = (0.0, 0.0, 0.0)
+    size = start
+    spare = -1.0
+    while size >= minimum - 0.01:
+        shape = page.new_shape()
+        spare = shape.insert_textbox(
+            rect, text, fontfile=fontfile, fontname="fit", fontsize=size,
+            lineheight=lineheight, color=color, align=0, rotate=unit.rotation,
+        )
+        if spare >= -0.05:
+            break
+        size -= 0.2
+    overflow = spare < -0.05
+    if overflow and unit.rotation == 0:
+        # One final expansion into unused local space, never past the page footer.
+        rect.y1 = min(page.rect.height - 48, rect.y1 + max(5.0, unit.font_size * 1.2))
+        size = minimum
+        lineheight = 1.05
+        shape = page.new_shape()
+        spare = shape.insert_textbox(rect, text, fontfile=fontfile, fontname="fit2", fontsize=size, lineheight=lineheight, color=color, align=0)
+        overflow = spare < -0.05
+    page.insert_textbox(
+        rect, text, fontfile=fontfile,
+        fontname="kobold" if fontfile == bold_font else "koreg",
+        fontsize=size, lineheight=lineheight, color=color, align=0,
+        rotate=unit.rotation, overlay=True,
+    )
+    return {"page": unit.page_no, "kind": unit.kind, "source": unit.text[:250], "translation": text[:250], "bbox": list(rect), "font_original": unit.font_size, "font_used": size, "overflow": overflow}
+
+
+def cell_font_size(source_size: float, cell: fitz.Rect, text: str) -> tuple[float, float]:
+    if cell.width < 45:
+        return min(6.3, max(5.4, source_size * 0.80)), 4.8
+    if cell.width < 90:
+        return min(7.4, max(6.2, source_size * 0.82)), 5.3
+    return min(8.8, max(7.0, source_size * 0.84)), 5.8
+
+
+def source_cell_style(page: fitz.Page, cell: fitz.Rect) -> tuple[float, bool, int]:
+    sizes = []
+    bolds = []
+    centers = []
+    data = page.get_text("dict", flags=fitz.TEXTFLAGS_DICT)
+    for block in data.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                sb = fitz.Rect(span["bbox"])
+                center = ((sb.x0 + sb.x1) / 2, (sb.y0 + sb.y1) / 2)
+                if cell.contains(center) and span.get("text", "").strip():
+                    sizes.append(float(span.get("size", 8)))
+                    bolds.append("bold" in span.get("font", "").lower() or (int(span.get("flags", 0)) & 16))
+                    centers.append((sb.x0 + sb.x1) / 2)
+    size = statistics.median(sizes) if sizes else 8.0
     bold = sum(1 for x in bolds if x) >= max(1, len(bolds) // 2) if bolds else False
     align = 1 if centers and abs(statistics.median(centers) - (cell.x0 + cell.x1) / 2) < cell.width * 0.12 else 0
     return size, bold, align
@@ -10,6 +118,16 @@ def place_table_cell(page: fitz.Page, source_page: fitz.Page, cell_bbox: Sequenc
     fontfile = bold_font if bold else regular_font
     rect = fitz.Rect(cell.x0 + 4.0, cell.y0 + 1.5, cell.x1 - 4.0, cell.y1 - 1.5)
     start, minimum = cell_font_size(src_size, cell, text)
+    if "\n" not in text and cell.height < 14:
+        font = fitz.Font(fontfile=fontfile)
+        size = min(start, 5.8)
+        while font.text_length(text, fontsize=size) > rect.width and size > 4.6:
+            size -= 0.15
+        tw = font.text_length(text, fontsize=size)
+        x = rect.x0 + max(0, (rect.width - tw) / 2)
+        y = cell.y0 + (cell.height + size) / 2 - 1.0
+        page.insert_text((x, y), text, fontfile=fontfile, fontname="tshort", fontsize=size, color=(0,0,0), overlay=True)
+        return {"bbox": list(cell), "text": text, "font_used": size, "overflow": tw > rect.width + 0.2}
     size = start
     spare = -1.0
     while size >= minimum - 0.01:
@@ -20,120 +138,3 @@ def place_table_cell(page: fitz.Page, source_page: fitz.Page, cell_bbox: Sequenc
         size -= 0.15
     overflow = spare < -0.05
     if overflow:
-        size = minimum
-    page.insert_textbox(rect, text, fontfile=fontfile, fontname="tbold" if bold else "treg", fontsize=size, lineheight=1.06, color=(0,0,0), align=align, overlay=True)
-    return {"bbox": list(cell), "text": text, "font_used": size, "overflow": overflow}
-
-
-def parse_toc_rows(page: fitz.Page) -> list[dict]:
-    lines = [l for l in extract_lines(page) if 65 < l.bbox[1] < page.rect.height - 65 and norm(l.text)]
-    lines.sort(key=lambda l: (round(l.bbox[1], 1), l.bbox[0]))
-    # Group by block and retain original line order, which is highly regular in this document.
-    by_block: dict[int, list[Line]] = {}
-    for l in lines:
-        by_block.setdefault(l.block_no, []).append(l)
-    rows = []
-    for block_lines in by_block.values():
-        block_lines.sort(key=lambda l: (l.bbox[1], l.bbox[0]))
-        i = 0
-        while i < len(block_lines):
-            line = block_lines[i]
-            t = norm(line.text)
-            # Standalone headings.
-            if t in {"CONTENTS", "PARAGRAPH", "PAGE", "FIGURES", "TABLES"}:
-                rows.append({"kind": "heading", "text": t, "bbox": line.bbox, "font_size": line.font_size, "bold": line.bold})
-                i += 1
-                continue
-            number_line = None
-            if TOC_NUM_RE.fullmatch(t):
-                number_line = line
-                i += 1
-                if i >= len(block_lines):
-                    continue
-                line = block_lines[i]
-                t = norm(line.text)
-            # Build one entry, including wrapped title lines, until a dotted leader line is reached.
-            title_lines = []
-            while i < len(block_lines):
-                candidate = block_lines[i]
-                ct = norm(candidate.text)
-                if TOC_NUM_RE.fullmatch(ct) and title_lines:
-                    break
-                title_lines.append(candidate)
-                i += 1
-                if DOTS_RE.search(ct) and PAGE_END_RE.search(ct):
-                    break
-            if not title_lines:
-                continue
-            full = " ".join(norm(x.text) for x in title_lines)
-            mpage = PAGE_END_RE.search(full)
-            mdots = DOTS_RE.search(full)
-            if not (mpage and mdots):
-                # Non-entry explanatory text is kept as an ordinary label.
-                bbox = (
-                    min(x.bbox[0] for x in title_lines), min(x.bbox[1] for x in title_lines),
-                    max(x.bbox[2] for x in title_lines), max(x.bbox[3] for x in title_lines),
-                )
-                rows.append({"kind": "label", "text": full, "bbox": bbox, "font_size": statistics.median(x.font_size for x in title_lines), "bold": any(x.bold for x in title_lines)})
-                continue
-            title = full[:mdots.start()].strip()
-            page_label = mpage.group(1)
-            bbox = (
-                min(x.bbox[0] for x in title_lines), min(x.bbox[1] for x in title_lines),
-                max(x.bbox[2] for x in title_lines), max(x.bbox[3] for x in title_lines),
-            )
-            rows.append({
-                "kind": "entry", "number": norm(number_line.text) if number_line else "",
-                "number_bbox": number_line.bbox if number_line else None,
-                "title": title, "page_label": page_label, "bbox": bbox,
-                "font_size": statistics.median(x.font_size for x in title_lines),
-                "bold": any(x.bold for x in title_lines),
-            })
-    rows.sort(key=lambda r: (r["bbox"][1], r["bbox"][0]))
-    return rows
-
-
-def draw_toc_entry(page: fitz.Page, row: dict, translated: str, regular_font: str, bold_font: str) -> dict:
-    color = (0.0, 0.0, 0.85)
-    fontfile = bold_font if row.get("bold") else regular_font
-    bbox = fitz.Rect(row["bbox"])
-    font = fitz.Font(fontfile=fontfile)
-    size = min(8.2, max(6.8, row.get("font_size", 8.0) * 0.88))
-    if row.get("number") and row.get("number_bbox"):
-        nb = fitz.Rect(row["number_bbox"])
-        page.insert_text((nb.x0, nb.y1 - 2.2), row["number"], fontfile=fontfile, fontname="tocnum", fontsize=size, color=color, overlay=True)
-    x0 = bbox.x0
-    right = min(page.rect.width - 42, 543)
-    page_label = str(row["page_label"])
-    page_width = font.text_length(page_label, fontsize=size)
-    available = right - x0 - page_width - 10
-    # Fit to one or two lines within the original row height.
-    lineheight = size * 1.13
-    words = translated.split()
-    lines = []
-    current = ""
-    for word in words:
-        cand = f"{current} {word}".strip() if current else word
-        if font.text_length(cand, fontsize=size) <= available:
-            current = cand
-        else:
-            if current:
-                lines.append(current)
-            current = word
-    if current:
-        lines.append(current)
-    while (len(lines) > 2 or len(lines) * lineheight > bbox.height + 2) and size > 6.0:
-        size -= 0.2
-        page_width = font.text_length(page_label, fontsize=size)
-        available = right - x0 - page_width - 10
-        lineheight = size * 1.10
-        lines = []
-        current = ""
-        for word in words:
-            cand = f"{current} {word}".strip() if current else word
-            if font.text_length(cand, fontsize=size) <= available:
-                current = cand
-            else:
-                if current:
-                    lines.append(current)
-                current = word
