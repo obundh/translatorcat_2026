@@ -23,8 +23,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/upload-artifact@v4
         with:
-          name: MIL461H_REVISION_SCRIPTS
+          name: MIL461H_REVISION_SCRIPTS_ALL
           path: |
+            scripts/mil461h_full_ko.py
             scripts/mil461h_revision2.py
             scripts/mil461h_revision2_full.py
           if-no-files-found: error
