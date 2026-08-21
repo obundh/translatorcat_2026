@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
 import re
 import statistics
+import time
+
+import fitz
 
 import milstd461h_v2 as base
 
@@ -38,6 +42,8 @@ base.EXACT.update(
         "Directional coupler.": "방향성 결합기.",
         "Attenuator, 50 ohm.": "감쇠기, 50 Ω.",
         "Data recording device.": "데이터 기록 장치.",
+        "Downloaded from https://ib-lenhardt.com | IBL-Lab GmbH - MIL-STD-461H / EMC Military Testing & Certification":
+            "https://ib-lenhardt.com에서 내려받음 | IBL-Lab GmbH - MIL-STD-461H / EMC 군용 시험 및 인증",
     }
 )
 
@@ -53,9 +59,13 @@ base.NORMALIZE_TERMS.update(
         "셀프 호환": "자체 적합성",
         "마이크로파라드": "마이크로패럿",
         "마이크로패러드": "마이크로패럿",
+        "마이크로파드": "마이크로패럿",
         "헤르츠": "Hz",
         "선에서 지면으로": "선-접지",
         "라인 대 접지": "선-접지",
+        "라인-대-지면": "선-접지",
+        "라인 투 지면": "선-접지",
+        "지면 필터": "접지 필터",
         "커패시턴스": "정전용량",
         "기술 매뉴얼": "기술교범",
         "전기 기계": "전자기계식",
@@ -65,8 +75,14 @@ base.NORMALIZE_TERMS.update(
         "장치용 장치": "장비",
         "플랫폼 요구 사항": "플랫폼 요구사항",
         "계약상의 EMI 요구사항": "계약상 EMI 요구사항",
+        "계약상의 EMI": "계약상 EMI",
+        "특정된 CI": "지정된 CI",
         "3 dB 빔 폭": "3 dB 빔폭",
-        "펄스 변조": "펄스 변조",
+        "감응도": "내성",
+        "DoD 활동": "DoD 기관",
+        "EMC 군사 시험": "EMC 군용 시험",
+        "군사 시험 및 인증": "군용 시험 및 인증",
+        "Hz(Hz)": "Hz",
     }
 )
 
@@ -103,6 +119,131 @@ def should_translate(text: str) -> bool:
 
 
 base.should_translate = should_translate
+
+
+# ---------------------------------------------------------------------------
+# Coherent paragraph translation. Long paragraphs are split at sentence
+# boundaries before NLLB generation, preventing the 512-token decoder cutoff
+# that truncated the first pilot's longer requirements.
+# ---------------------------------------------------------------------------
+def _split_for_nllb(translator: base.NLLBTranslator, text: str, max_tokens: int = 280) -> list[str]:
+    def token_count(value: str) -> int:
+        return len(translator._encode(value))
+
+    if token_count(text) <= max_tokens:
+        return [text]
+
+    sentences = [item.strip() for item in re.split(r"(?<=[.!?;:])\s+", text) if item.strip()]
+    if len(sentences) <= 1:
+        sentences = [item.strip() for item in re.split(r"(?<=,)\s+", text) if item.strip()]
+
+    chunks: list[str] = []
+    current = ""
+    for sentence in sentences:
+        candidate = f"{current} {sentence}".strip() if current else sentence
+        if token_count(candidate) <= max_tokens:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        if token_count(sentence) <= max_tokens:
+            current = sentence
+            continue
+        # Last-resort word grouping for an exceptionally long sentence.
+        current = ""
+        for word in sentence.split():
+            candidate = f"{current} {word}".strip() if current else word
+            if token_count(candidate) <= max_tokens:
+                current = candidate
+            else:
+                if current:
+                    chunks.append(current)
+                current = word
+    if current:
+        chunks.append(current)
+    return chunks or [text]
+
+
+def translate_all(self: base.NLLBTranslator, texts) -> None:
+    pending: list[dict] = []
+    for source in texts:
+        if source in self.cache:
+            continue
+        exact = base.translate_exact_or_none(source)
+        if exact is not None:
+            self.cache[source] = base.normalize_translation(exact)
+            continue
+        toc = base.TOC_RE.match(source)
+        if toc:
+            label, dots, page_no = toc.groups()
+            exact_label = base.translate_exact_or_none(label.strip())
+            if exact_label is not None:
+                self.cache[source] = f"{exact_label} {dots}{page_no}"
+                continue
+            protected, mapping = base.protect_text(label.strip())
+            pending.append(
+                {
+                    "source": source,
+                    "chunks": _split_for_nllb(self, protected),
+                    "mapping": mapping,
+                    "suffix": f" {dots}{page_no}",
+                }
+            )
+            continue
+        protected, mapping = base.protect_text(source)
+        pending.append(
+            {
+                "source": source,
+                "chunks": _split_for_nllb(self, protected),
+                "mapping": mapping,
+                "suffix": "",
+            }
+        )
+
+    flat: list[tuple[int, int, str]] = []
+    for item_index, item in enumerate(pending):
+        for chunk_index, chunk in enumerate(item["chunks"]):
+            flat.append((item_index, chunk_index, chunk))
+
+    translated_chunks: dict[int, dict[int, str]] = {}
+    print(f"Translation cache={len(self.cache)}; pending units={len(pending)}; chunks={len(flat)}", flush=True)
+    start = time.time()
+    batch_limit = 64
+    for offset in range(0, len(flat), batch_limit):
+        batch = flat[offset : offset + batch_limit]
+        source_tokens = [self._encode(item[2]) for item in batch]
+        results = self.translator.translate_batch(
+            source_tokens,
+            target_prefix=[["kor_Hang"] for _ in source_tokens],
+            beam_size=4,
+            max_decoding_length=512,
+            batch_type="tokens",
+            max_batch_size=1536,
+            return_scores=False,
+            replace_unknowns=True,
+        )
+        for (item_index, chunk_index, _chunk), result in zip(batch, results):
+            translated_chunks.setdefault(item_index, {})[chunk_index] = self._decode(result.hypotheses[0])
+        if offset % (batch_limit * 5) == 0 or offset + batch_limit >= len(flat):
+            done = min(len(flat), offset + batch_limit)
+            elapsed = max(1.0, time.time() - start)
+            print(f"Translated {done}/{len(flat)} chunks ({done / elapsed:.2f} chunks/s)", flush=True)
+
+    for item_index, item in enumerate(pending):
+        translated = " ".join(
+            translated_chunks[item_index][index].strip()
+            for index in range(len(item["chunks"]))
+        )
+        translated = base.restore_placeholders(translated, item["mapping"])
+        translated = base.normalize_translation(translated) + item["suffix"]
+        if not base.KOREAN_RE.search(translated) and base.should_translate(item["source"]):
+            translated = item["source"]
+        self.cache[item["source"]] = translated
+
+    self.cache_path.write_text(json.dumps(self.cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+base.NLLBTranslator.translate_all = translate_all
 
 
 # ---------------------------------------------------------------------------
@@ -145,9 +286,6 @@ def make_units(page, page_no: int) -> list[base.Unit]:
             toc = base.TOC_RE.match(text)
             heading = is_heading_line(line, page_width)
 
-            # Exact fixed labels (METRIC, SUPERSEDING, dates, cover title lines,
-            # distribution statement, etc.) must be translated even when they
-            # look like codes or all-caps identifiers.
             if exact is not None:
                 units.append(
                     base.Unit(
@@ -164,8 +302,6 @@ def make_units(page, page_no: int) -> list[base.Unit]:
                 i += 1
                 continue
 
-            # Numeric list labels, page numbers and standard/test identifiers
-            # remain untouched. The following body text is translated separately.
             if (
                 base.SECTION_ONLY_RE.fullmatch(text)
                 or base.BULLET_ONLY_RE.fullmatch(text)
@@ -190,9 +326,6 @@ def make_units(page, page_no: int) -> list[base.Unit]:
                 i += 1
                 continue
 
-            # Translate a complete paragraph/list item as one semantic unit, but
-            # retain every original line box so the Korean text is redistributed
-            # onto the original baselines rather than creating a new page design.
             group = [line]
             start_x = line.bbox[0]
             start_bullet = bool(base.BULLET_PREFIX_RE.match(text))
@@ -244,6 +377,127 @@ def make_units(page, page_no: int) -> list[base.Unit]:
 
 
 base.make_units = make_units
+
+
+_original_choose_wrap = base.choose_wrap
+
+
+def choose_wrap(unit: base.Unit, translation: str, font: fitz.Font):
+    wrapped, size, width_scale, fits = _original_choose_wrap(unit, translation, font)
+    if fits and len(wrapped) <= len(unit.lines):
+        return wrapped, size, width_scale, True
+
+    widths = [max(8.0, line.width + 2.0) for line in unit.lines]
+    for factor in (0.66, 0.62, 0.58, 0.54, 0.50, 0.46):
+        candidate_size = max(3.0, unit.font_size * factor)
+        for scale in (1.0, 0.96, 0.92, 0.88):
+            candidate, candidate_fits = base.wrap_to_widths(font, translation, candidate_size, widths, scale)
+            if candidate_fits and len(candidate) <= len(widths):
+                return candidate, candidate_size, scale, True
+    # This path should be exceptionally rare. It is kept as a QA failure rather
+    # than silently dropping the end of a translated requirement.
+    return wrapped, size, width_scale, False
+
+
+base.choose_wrap = choose_wrap
+
+
+def redact_and_place(page, units, regular_font_file: str, bold_font_file: str) -> list[dict]:
+    arr, sx, sy = base.page_background(page)
+    todo = []
+    for unit in units:
+        translation = unit.translated_text
+        if not translation or (translation == unit.source_text and not base.KOREAN_RE.search(translation)):
+            continue
+        background = base.sample_background(arr, sx, sy, unit.bbox)
+        todo.append((unit, translation, background))
+        for line in unit.lines:
+            if line.rotation == 0:
+                # PyMuPDF line bboxes overlap adjacent baselines. A tight box
+                # derived from the actual baseline prevents a translated date or
+                # heading from erasing an untranslated MIL-STD code above it.
+                rect = fitz.Rect(
+                    line.bbox[0] - 0.35,
+                    line.origin[1] - line.font_size * 0.84,
+                    line.bbox[2] + 0.35,
+                    line.origin[1] + line.font_size * 0.20,
+                )
+            else:
+                rect = fitz.Rect(line.bbox)
+                rect.x0 -= 0.35
+                rect.y0 -= 0.20
+                rect.x1 += 0.35
+                rect.y1 += 0.20
+            page.add_redact_annot(rect, fill=background, cross_out=False)
+
+    if not todo:
+        return []
+
+    page.apply_redactions(
+        images=fitz.PDF_REDACT_IMAGE_NONE,
+        graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+        text=fitz.PDF_REDACT_TEXT_REMOVE,
+    )
+
+    regular_font = fitz.Font(fontfile=regular_font_file)
+    bold_font = fitz.Font(fontfile=bold_font_file)
+    records: list[dict] = []
+    for unit, translation, _background in todo:
+        font_file = bold_font_file if unit.bold else regular_font_file
+        font = bold_font if unit.bold else regular_font
+        wrapped, size, width_scale, fits = base.choose_wrap(unit, translation, font)
+        for index, line in enumerate(unit.lines):
+            if index >= len(wrapped):
+                continue
+            value = wrapped[index]
+            if not value:
+                continue
+            if line.rotation == 0:
+                x = base.line_alignment(unit, line, value, font, size)
+                y = line.origin[1] - max(0.0, (line.font_size - size) * 0.08) + 0.05
+                page.insert_text(
+                    fitz.Point(x, y),
+                    value,
+                    fontfile=font_file,
+                    fontname="kob" if unit.bold else "kor",
+                    fontsize=size,
+                    color=line.color if max(line.color) > 0.1 else (0, 0, 0),
+                    overlay=True,
+                )
+            else:
+                rect = fitz.Rect(line.bbox)
+                page.insert_textbox(
+                    rect,
+                    value,
+                    fontfile=font_file,
+                    fontname="kob" if unit.bold else "kor",
+                    fontsize=size,
+                    color=line.color if max(line.color) > 0.1 else (0, 0, 0),
+                    align=unit.align,
+                    rotate=line.rotation,
+                    overlay=True,
+                    lineheight=1.0,
+                )
+        records.append(
+            {
+                "page": unit.page_no,
+                "kind": unit.kind,
+                "source": unit.source_text,
+                "translation": translation,
+                "line_count_original": len(unit.lines),
+                "line_count_used": len(wrapped),
+                "font_size_original": unit.font_size,
+                "font_size_used": size,
+                "font_scale": size / unit.font_size if unit.font_size else None,
+                "width_scale": width_scale,
+                "fit": fits,
+                "bbox": list(unit.bbox),
+            }
+        )
+    return records
+
+
+base.redact_and_place = redact_and_place
 
 
 if __name__ == "__main__":
