@@ -1,18 +1,6 @@
-name: Build MIL-STD-461H Korean full translation
+name: Build MIL-STD-461H Korean full translation (Marian fallback)
 
 on:
-  push:
-    branches:
-      - automation/milstd461h-ko-full-20260821
-    paths:
-      - 'scripts/mil461h_full_ko.py'
-      - '.github/workflows/mil461h_full_ko.yml'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'scripts/mil461h_full_ko.py'
-      - '.github/workflows/mil461h_full_ko.yml'
   workflow_dispatch:
 
 permissions:
@@ -61,8 +49,7 @@ jobs:
             -o work/MIL_STD_461H_2026_EN.pdf
           python - <<'PY'
           import fitz
-          p='work/MIL_STD_461H_2026_EN.pdf'
-          d=fitz.open(p)
+          d=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
           assert d.page_count == 294, d.page_count
           print('Source verified:', d.page_count, 'pages')
           PY
@@ -84,19 +71,11 @@ jobs:
             MIL_STD_461H_2026_KO_REGRESSION.json \
             MIL_STD_461H_2026_KO_COMPARISON.png \
             README_KO.txt SHA256SUMS.txt
-          ls -lh
 
       - name: Upload verified translation artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MIL_STD_461H_2026_KO_FULL
-          path: |
-            output/MIL_STD_461H_2026_KO_FULL.pdf
-            output/MIL_STD_461H_2026_KO_FULL_PACKAGE.zip
-            output/MIL_STD_461H_2026_KO_QA.json
-            output/MIL_STD_461H_2026_KO_REGRESSION.json
-            output/MIL_STD_461H_2026_KO_COMPARISON.png
-            output/README_KO.txt
-            output/SHA256SUMS.txt
+          name: MIL_STD_461H_2026_KO_FULL_MARIAN
+          path: output/*
           if-no-files-found: error
           retention-days: 7
