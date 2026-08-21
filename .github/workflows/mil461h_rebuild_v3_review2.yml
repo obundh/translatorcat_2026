@@ -1,0 +1,102 @@
+name: MIL-STD-461H Korean rebuild v3 final review
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/mil461h/v3_src/**'
+      - '.github/workflows/mil461h_rebuild_v3_review2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Korean fonts and PDF tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk poppler-utils zip
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'pymupdf==1.26.7' requests pillow numpy
+      - name: Assemble rebuild engine
+        run: |
+          mkdir -p scripts work output renders
+          cat .github/mil461h/v3_src/src_*.part > scripts/mil461h_rebuild_v3.py
+          python -m py_compile scripts/mil461h_rebuild_v3.py
+      - name: Download source
+        run: |
+          curl --retry 5 --retry-delay 5 -fL \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o work/MIL_STD_461H_2026_EN.pdf
+          python - <<'PY'
+          import fitz
+          d=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          assert d.page_count == 294 and not d.is_encrypted
+          print('Source verified:', d.page_count)
+          PY
+      - name: Restore prior translation cache
+        uses: actions/cache@v4
+        with:
+          path: work/google_translation_cache.json
+          key: mil461h-google-ko-v3-review-${{ hashFiles('.github/mil461h/v3_src/**') }}
+          restore-keys: |
+            mil461h-google-ko-v3-
+      - name: Build targeted review pages
+        run: |
+          python scripts/mil461h_rebuild_v3.py \
+            --source work/MIL_STD_461H_2026_EN.pdf \
+            --output output/MIL461H_KO_V3_FINAL_REVIEW.pdf \
+            --cache work/google_translation_cache.json \
+            --qa output/MIL461H_KO_V3_FINAL_REVIEW_QA.json \
+            --validation output/MIL461H_KO_V3_FINAL_REVIEW_VALIDATION.json \
+            --pages '1,3,5,15,21,23,47,82,147,158,165,172,181,203,217,231,234,236,281,293,294' \
+            --workers 6
+      - name: Render individual pages and contact sheet
+        run: |
+          pdftoppm -r 170 -jpeg -jpegopt quality=92 output/MIL461H_KO_V3_FINAL_REVIEW.pdf renders/page >/dev/null 2>&1
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageDraw, ImageFont
+          source_pages=[1,3,5,15,21,23,47,82,147,158,165,172,181,203,217,231,234,236,281,293,294]
+          files=sorted(Path('renders').glob('page-*.jpg'))
+          font=ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',18)
+          thumbs=[]
+          thumb_w=500
+          for pno,path in zip(source_pages,files):
+              img=Image.open(path).convert('RGB')
+              scale=thumb_w/img.width
+              thumb=img.resize((thumb_w,int(img.height*scale)))
+              canvas=Image.new('RGB',(thumb_w,thumb.height+28),'white')
+              canvas.paste(thumb,(0,28))
+              ImageDraw.Draw(canvas).text((5,4),f'SOURCE PAGE {pno}',font=font,fill='black')
+              thumbs.append(canvas)
+              img.save(f'output/MIL461H_KO_REVIEW_SOURCEPAGE_{pno:03d}.jpg',quality=92)
+          cols=3
+          cell_h=max(x.height for x in thumbs)
+          rows=(len(thumbs)+cols-1)//cols
+          sheet=Image.new('RGB',(thumb_w*cols,cell_h*rows),'white')
+          for i,img in enumerate(thumbs):
+              sheet.paste(img,((i%cols)*thumb_w,(i//cols)*cell_h))
+          sheet.save('output/MIL461H_KO_V3_FINAL_REVIEW_CONTACT.jpg',quality=92)
+          PY
+          cp work/google_translation_cache.json output/google_translation_cache.json
+          ls -lh output
+      - name: Upload review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIL461H_KO_V3_FINAL_REVIEW
+          path: output/*
+          if-no-files-found: error
+          retention-days: 3
