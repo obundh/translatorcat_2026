@@ -1,0 +1,149 @@
+name: MIL-STD-461H Korean v3 full fixed artifact
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/mil461h/v3_src/**'
+      - '.github/workflows/mil461h_rebuild_v3_full_fixed.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Korean fonts and PDF tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk poppler-utils zip
+          python -m pip install --upgrade pip
+          python -m pip install 'pymupdf==1.26.7' requests pillow numpy
+
+      - name: Assemble engine in the correct order
+        run: |
+          mkdir -p scripts work output
+          cat \
+            .github/mil461h/v3_src/src_01.part \
+            .github/mil461h/v3_src/src_02.part \
+            .github/mil461h/v3_src/src_03.part \
+            .github/mil461h/v3_src/src_04.part \
+            .github/mil461h/v3_src/src_05.part \
+            .github/mil461h/v3_src/src_06.part \
+            .github/mil461h/v3_src/src_07.part \
+            .github/mil461h/v3_src/src_08.part \
+            .github/mil461h/v3_src/src_09.part \
+            > scripts/base.py
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          base = Path('scripts/base.py').read_text(encoding='utf-8')
+          base = re.sub(r'\nif __name__\s*==\s*["\x27]__main__["\x27]\s*:\s*\n\s*main\(\)\s*\Z', '\n', base)
+          patches = []
+          for name in ('src_04a.part','src_07a.part','src_08a.part'):
+              patches.append(Path('.github/mil461h/v3_src', name).read_text(encoding='utf-8'))
+          final = base.rstrip() + '\n\n' + '\n\n'.join(patches) + '\n\nif __name__ == "__main__":\n    main()\n'
+          path = Path('scripts/mil461h_rebuild_v3.py')
+          path.write_text(final, encoding='utf-8')
+          compile(final, str(path), 'exec')
+          print('Engine bytes:', path.stat().st_size)
+          PY
+          sha256sum scripts/mil461h_rebuild_v3.py
+
+      - name: Download and verify source PDF
+        run: |
+          curl --retry 5 --retry-delay 5 -fL \
+            'https://ib-lenhardt.com/media/pages/product-testing/mil-std-461-standard/5f60c140af-1778507796/mil-std-461h-ibl-lab.pdf' \
+            -o work/MIL_STD_461H_2026_EN.pdf
+          python - <<'PY'
+          import fitz
+          d=fitz.open('work/MIL_STD_461H_2026_EN.pdf')
+          assert d.page_count == 294 and not d.is_encrypted
+          print('Source verified:', d.page_count)
+          PY
+
+      - name: Restore translation cache
+        uses: actions/cache@v4
+        with:
+          path: work/google_translation_cache.json
+          key: mil461h-google-ko-v3-fixed-${{ hashFiles('.github/mil461h/v3_src/**') }}
+          restore-keys: |
+            mil461h-google-ko-v3-
+
+      - name: Build all 294 Korean pages
+        run: |
+          python scripts/mil461h_rebuild_v3.py \
+            --source work/MIL_STD_461H_2026_EN.pdf \
+            --output output/MIL461H_KO_FINAL_294P.pdf \
+            --cache work/google_translation_cache.json \
+            --qa output/MIL461H_KO_FINAL_QA.json \
+            --validation output/MIL461H_KO_FINAL_VALIDATION.json \
+            --workers 4
+          cp work/google_translation_cache.json output/google_translation_cache.json
+
+      - name: Verify PDF and create split files
+        run: |
+          python - <<'PY'
+          import fitz, pathlib, hashlib, json
+          out=pathlib.Path('output')
+          pdf=out/'MIL461H_KO_FINAL_294P.pdf'
+          d=fitz.open(pdf)
+          assert d.page_count == 294
+          assert not d.is_encrypted
+          manifest={
+            'file':pdf.name,
+            'bytes':pdf.stat().st_size,
+            'pages':d.page_count,
+            'encrypted':bool(d.is_encrypted),
+            'sha256':hashlib.sha256(pdf.read_bytes()).hexdigest(),
+          }
+          for first,last in [(1,100),(101,200),(201,294)]:
+              part=fitz.open(); part.insert_pdf(d,from_page=first-1,to_page=last-1)
+              path=out/f'MIL461H_KO_FINAL_P{first:03d}_{last:03d}.pdf'
+              part.save(path,garbage=4,deflate=True); part.close()
+              c=fitz.open(path)
+              manifest[path.name]={'bytes':path.stat().st_size,'pages':c.page_count,'encrypted':bool(c.is_encrypted),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}
+              c.close()
+          # Render representative pages to prove the PDF opens and paints.
+          for pno in (1,3,15,21,23,47,165,294):
+              pix=d[pno-1].get_pixmap(matrix=fitz.Matrix(1.0,1.0),alpha=False)
+              pix.save(out/f'CHECK_PAGE_{pno:03d}.png')
+          d.close()
+          (out/'MIL461H_KO_FINAL_MANIFEST.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+
+      - name: Build ZIP and test it
+        run: |
+          cp work/MIL_STD_461H_2026_EN.pdf output/MIL461H_EN_ORIGINAL_294P.pdf
+          cd output
+          sha256sum MIL461H_KO_FINAL_294P.pdf MIL461H_KO_FINAL_P001_100.pdf MIL461H_KO_FINAL_P101_200.pdf MIL461H_KO_FINAL_P201_294.pdf > SHA256SUMS.txt
+          zip -9 MIL461H_KO_FINAL_PACKAGE.zip \
+            MIL461H_KO_FINAL_294P.pdf \
+            MIL461H_KO_FINAL_P001_100.pdf \
+            MIL461H_KO_FINAL_P101_200.pdf \
+            MIL461H_KO_FINAL_P201_294.pdf \
+            MIL461H_EN_ORIGINAL_294P.pdf \
+            MIL461H_KO_FINAL_QA.json \
+            MIL461H_KO_FINAL_VALIDATION.json \
+            MIL461H_KO_FINAL_MANIFEST.json \
+            SHA256SUMS.txt
+          unzip -t MIL461H_KO_FINAL_PACKAGE.zip
+          ls -lh
+
+      - name: Upload actual final files
+        uses: actions/upload-artifact@v4
+        with:
+          name: MIL461H_KO_FINAL_294P_FIXED
+          path: output/*
+          if-no-files-found: error
+          retention-days: 7
