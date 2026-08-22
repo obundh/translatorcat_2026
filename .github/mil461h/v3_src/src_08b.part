@@ -1,0 +1,16 @@
+
+# PyMuPDF text boxes accept only 0/90/180/270 degree rotations. A small number
+# of source figure labels carry arbitrary transform angles; render those labels
+# horizontally rather than aborting the complete 294-page build.
+_previous_place_text_fit_rotation_safe = place_text_fit
+
+
+def place_text_fit(page: fitz.Page, unit: Unit, text: str, regular_font: str, bold_font: str, next_y: float | None = None) -> dict:
+    original_rotation = unit.rotation
+    if original_rotation not in (0, 90, 180, 270):
+        unit.rotation = 0
+    try:
+        return _previous_place_text_fit_rotation_safe(page, unit, text, regular_font, bold_font, next_y=next_y)
+    finally:
+        unit.rotation = original_rotation
+
