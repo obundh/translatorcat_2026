@@ -44,12 +44,12 @@ jobs:
           from pathlib import Path
           import re
           base = Path('scripts/base.py').read_text(encoding='utf-8')
-          # Remove the base entry point so reviewed overrides are installed first.
           base = re.sub(r'\nif __name__\s*==\s*["\x27]__main__["\x27]\s*:\s*\n\s*main\(\)\s*\Z', '\n', base)
           patches = [
               Path('.github/mil461h/v3_src/src_04a.part').read_text(encoding='utf-8'),
               Path('.github/mil461h/v3_src/src_07a.part').read_text(encoding='utf-8'),
               Path('.github/mil461h/v3_src/src_08a.part').read_text(encoding='utf-8'),
+              Path('.github/mil461h/v3_src/src_08b.part').read_text(encoding='utf-8'),
           ]
           final = base.rstrip() + '\n\n' + '\n\n'.join(patches) + '\n\nif __name__ == "__main__":\n    main()\n'
           path = Path('scripts/mil461h_rebuild_v3.py')
@@ -75,7 +75,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: work/google_translation_cache.json
-          key: mil461h-google-ko-v3-fixed-goodbase-${{ hashFiles('.github/mil461h/v3_src/src_04a.part', '.github/mil461h/v3_src/src_07a.part', '.github/mil461h/v3_src/src_08a.part') }}
+          key: mil461h-google-ko-v3-fixed-goodbase-${{ hashFiles('.github/mil461h/v3_src/src_04a.part', '.github/mil461h/v3_src/src_07a.part', '.github/mil461h/v3_src/src_08a.part', '.github/mil461h/v3_src/src_08b.part') }}
           restore-keys: |
             mil461h-google-ko-v3-
 
